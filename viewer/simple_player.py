@@ -11,6 +11,8 @@ import hl2ss_io
 
 # Directory containing the recorded data
 path = './data'
+if not os.path.exists(path):
+    os.mkdir(path)
 
 #------------------------------------------------------------------------------
 

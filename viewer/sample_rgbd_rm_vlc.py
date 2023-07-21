@@ -8,6 +8,7 @@ from pynput import keyboard
 
 import multiprocessing as mp
 import numpy as np
+import os
 import open3d as o3d
 import cv2
 import hl2ss_imshow
@@ -18,10 +19,12 @@ import hl2ss_3dcv
 #------------------------------------------------------------------------------
 
 # HoloLens address
-host = '192.168.1.7'
+host = "192.168.137.2"
 
 # Calibration path (must exist but can be empty)
 calibration_path = '../calibration'
+if not os.path.exists(calibration_path):
+    os.mkdir(calibration_path)
 
 # Port
 port = hl2ss.StreamPort.RM_VLC_RIGHTFRONT

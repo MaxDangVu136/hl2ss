@@ -3,11 +3,12 @@
 # with Open3D, from the depth and front RGB cameras of the HoloLens.
 # Press space to stop.
 #------------------------------------------------------------------------------
-
 from pynput import keyboard
-
 import multiprocessing as mp
+from datetime import datetime
 import numpy as np
+import csv
+import os
 import open3d as o3d
 import cv2
 import hl2ss_imshow
@@ -18,10 +19,12 @@ import hl2ss_3dcv
 # Settings --------------------------------------------------------------------
 
 # HoloLens address
-host = '192.168.1.7'
+host = '192.168.137.2'
 
 # Calibration path (must exist but can be empty)
 calibration_path = '../calibration'
+if not os.path.exists(calibration_path):
+    os.mkdir(calibration_path)
 
 # Front RGB camera parameters
 width = 640
@@ -31,7 +34,7 @@ framerate = 30
 # Video encoding profile
 profile = hl2ss.VideoProfile.H265_MAIN
 
-# Encoded stream average bits per second
+# Encoded stream average bits per secondx
 # Must be > 0
 bitrate = hl2ss.get_video_codec_bitrate(width, height, framerate, hl2ss.get_video_codec_default_factor(profile))
 
@@ -61,15 +64,16 @@ if __name__ == '__main__':
     # Get RM Depth Long Throw calibration -------------------------------------
     # Calibration data will be downloaded if it's not in the calibration folder
     calibration_lt = hl2ss_3dcv.get_calibration_rm(host, hl2ss.StreamPort.RM_DEPTH_LONGTHROW, calibration_path)
-
     uv2xy = hl2ss_3dcv.compute_uv2xy(calibration_lt.intrinsics, hl2ss.Parameters_RM_DEPTH_LONGTHROW.WIDTH, hl2ss.Parameters_RM_DEPTH_LONGTHROW.HEIGHT)
     xy1, scale = hl2ss_3dcv.rm_depth_compute_rays(uv2xy, calibration_lt.scale)
 
     # Create Open3D visualizer ------------------------------------------------
     o3d_lt_intrinsics = o3d.camera.PinholeCameraIntrinsic(hl2ss.Parameters_RM_DEPTH_LONGTHROW.WIDTH, hl2ss.Parameters_RM_DEPTH_LONGTHROW.HEIGHT, calibration_lt.intrinsics[0, 0], calibration_lt.intrinsics[1, 1], calibration_lt.intrinsics[2, 0], calibration_lt.intrinsics[2, 1])
+
     vis = o3d.visualization.Visualizer()
     vis.create_window()
     pcd = o3d.geometry.PointCloud()
+
     first_pcd = True
 
     # Start PV and RM Depth Long Throw streams --------------------------------
@@ -92,7 +96,7 @@ if __name__ == '__main__':
     # Initialize PV intrinsics and extrinsics ---------------------------------
     pv_intrinsics = hl2ss.create_pv_intrinsics_placeholder()
     pv_extrinsics = np.eye(4, 4, dtype=np.float32)
- 
+
     # Main Loop ---------------------------------------------------------------
     while (enable):
         # Wait for RM Depth Long Throw frame ----------------------------------
@@ -131,15 +135,15 @@ if __name__ == '__main__':
 
         # Display RGBD --------------------------------------------------------
         image = np.hstack((hl2ss_3dcv.rm_depth_to_rgb(depth) / 8, color / 255)) # Depth scaled for visibility
+
+        # Display the image with detected markers
         cv2.imshow('RGBD', image)
         cv2.waitKey(1)
 
         # Convert to Open3D RGBD image and create pointcloud ------------------
         color_image = o3d.geometry.Image(color)
         depth_image = o3d.geometry.Image(depth)
-
         rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(color_image, depth_image, depth_scale=1, depth_trunc=max_depth, convert_rgb_to_intensity=False)
-
         tmp_pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd, o3d_lt_intrinsics)
 
         # Display pointcloud --------------------------------------------------
@@ -154,6 +158,71 @@ if __name__ == '__main__':
 
         vis.poll_events()
         vis.update_renderer()
+
+    #   Save data at timepoint.
+    time = str(datetime.now()).replace(' ', '_')[:-7].replace(':', '-')
+
+    #vis.capture_screen_image(filename='data/rgb_images/rgb_{}.png'.format(time))
+    vis.capture_depth_image(filename='data/depth_images/original/depth_image_{}.png'.format(time), do_render=True)
+    vis.capture_depth_point_cloud(filename='data/point_clouds/binary/depth_point-cloud_{}.ply'.format(time),
+                                  do_render=True, convert_to_world_coordinate=True)
+
+    with open('data/points/depth_{}.csv'.format(time), 'w', newline='') as depth_file:
+        writer = csv.writer(depth_file)
+        writer.writerows(np.asarray(depth_image))
+    # with open('data/points/rgb_{}.csv'.format(time), 'w', newline='') as rgb_file:
+    #     writer = csv.writer(rgb_file)
+    #     writer.writerows(np.asarray(color_image))
+    with open('data/points/image_{}.csv'.format(time), 'w', newline='') as image_file:
+        writer = csv.writer(image_file)
+        writer.writerows(np.asarray(image))
+    with open('data/points/world_{}.csv'.format(time), 'w', newline='') as world_file:
+        writer = csv.writer(world_file)
+        writer.writerows(np.asarray(world_points))
+    with open('data/points/lt_{}.csv'.format(time), 'w', newline='') as lt_file:
+        writer = csv.writer(lt_file)
+        writer.writerows(np.asarray(lt_points))
+    with open('data/points/pv_uv_{}.csv'.format(time), 'w', newline='') as img_file:
+        writer = csv.writer(img_file)
+        writer.writerows(np.asarray(pv_uv))
+    with open('data/points/color_{}.csv'.format(time), 'w', newline='') as color_file:
+        writer = csv.writer(color_file)
+        writer.writerows(np.asarray(color))
+    with open('data/points/uv2xy_{}.csv'.format(time), 'w', newline='') as test0:
+        writer = csv.writer(test0)
+        writer.writerows(np.asarray(uv2xy))
+    with open('data/points/xy1_{}.csv'.format(time), 'w', newline='') as xy:
+        writer = csv.writer(xy)
+        writer.writerows(np.asarray(xy1))
+
+    # Store intrinsics, extrinsics matrices for analysis
+    with open('data/matrices/extrinsics_{}.csv'.format(time), 'w', newline='') as extrinsics:
+        writer = csv.writer(extrinsics)
+        writer.writerows(np.asarray(color_extrinsics))
+    with open('data/matrices/intrinsics_{}.csv'.format(time), 'w', newline='') as intrinsics:
+        writer = csv.writer(intrinsics)
+        writer.writerows(np.asarray(color_intrinsics))
+    with open('data/matrices/LT_extrinsics_{}.csv'.format(time), 'w', newline='') as lt_extrinsics:
+        writer = csv.writer(lt_extrinsics)
+        writer.writerows(np.asarray(calibration_lt.extrinsics))
+    with open('data/matrices/LT_intrinsics_{}.csv'.format(time), 'w', newline='') as lt_intrinsics:
+        writer = csv.writer(lt_intrinsics)
+        writer.writerows(np.asarray(calibration_lt.intrinsics))
+    with open('data/matrices/world_to_pv_{}.csv'.format(time), 'w', newline='') as world_to_pv:
+        writer = csv.writer(world_to_pv)
+        writer.writerows(np.asarray(world_to_pv_image))
+    with open('data/matrices/world_to_lt_{}.csv'.format(time), 'w', newline='') as world_lt:
+        writer = csv.writer(world_lt)
+        writer.writerows(np.asarray(world_to_lt))
+    with open('data/matrices/lt_to_world_{}.csv'.format(time), 'w', newline='') as lt_world:
+        writer = csv.writer(lt_world)
+        writer.writerows(np.asarray(lt_to_world))
+    with open('data/matrices/lt_pose_{}.csv'.format(time), 'w', newline='') as lt_pose:
+        writer = csv.writer(lt_pose)
+        writer.writerows(np.asarray(data_lt.pose))
+    with open('data/matrices/pv_pose_{}.csv'.format(time), 'w', newline='') as pv_pose:
+        writer = csv.writer(pv_pose)
+        writer.writerows(np.asarray(data_pv.pose))
 
     # Stop PV and RM Depth Long Throw streams ---------------------------------
     sink_pv.detach()

@@ -11,7 +11,7 @@ import hl2ss_rus
 # Settings --------------------------------------------------------------------
 
 # HoloLens address
-host = '192.168.1.7'
+host = "192.168.137.2"
 
 # Port
 port = hl2ss.IPCPort.UNITY_MESSAGE_QUEUE

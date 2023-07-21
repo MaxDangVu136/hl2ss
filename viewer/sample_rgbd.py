@@ -5,9 +5,10 @@
 #------------------------------------------------------------------------------
 
 from pynput import keyboard
-
+from datetime import datetime
 import multiprocessing as mp
 import numpy as np
+import os
 import open3d as o3d
 import cv2
 import hl2ss_imshow
@@ -18,16 +19,15 @@ import hl2ss_3dcv
 #------------------------------------------------------------------------------
 
 # HoloLens address
-host = '192.168.1.7'
+host = '192.168.137.2'
 
 # Port: RM Depth AHAT or RM Depth Long Throw
 port = hl2ss.StreamPort.RM_DEPTH_LONGTHROW
 
 # Calibration path (must exist but can be empty)
 calibration_path = '../calibration'
-
-# Use AB data to color the pointcloud
-use_ab = False
+if not os.path.exists(calibration_path):
+    os.mkdir(calibration_path)
 
 # Video encoding profile for AHAT
 ht_profile = hl2ss.VideoProfile.H265_MAIN
@@ -35,6 +35,9 @@ ht_profile = hl2ss.VideoProfile.H265_MAIN
 # Encoded stream average bits per second for AHAT
 # Must be > 0
 ht_bitrate = 8*1024*1024
+
+# Use AB data to color the pointcloud
+use_ab = False
 
 # Buffer length in seconds
 buffer_length = 10
@@ -54,10 +57,10 @@ if __name__ == '__main__':
     listener.start()
 
     # Get calibration ---------------------------------------------------------
-    # Calibration data will be downloaded if it's not in the calibration folder
+    # Calib ration data will be downloaded if it's not in the calibration folder
     calibration = hl2ss_3dcv.get_calibration_rm(host, port, calibration_path)
     xy1, scale = hl2ss_3dcv.rm_depth_compute_rays(calibration.uv2xy, calibration.scale)
-    max_depth = 8.0 if (port == hl2ss.StreamPort.RM_DEPTH_LONGTHROW) else (calibration.alias / calibration.scale)
+    max_depth = 0.5 if (port == hl2ss.StreamPort.RM_DEPTH_LONGTHROW) else (calibration.alias / calibration.scale)
     fps = hl2ss.Parameters_RM_DEPTH_LONGTHROW.FPS if (port == hl2ss.StreamPort.RM_DEPTH_LONGTHROW) else hl2ss.Parameters_RM_DEPTH_AHAT.FPS
 
     # Create Open3D visualizer ------------------------------------------------
@@ -93,6 +96,7 @@ if __name__ == '__main__':
 
         # Display RGBD --------------------------------------------------------
         image = np.hstack((depth / max_depth, ab)) # Depth scaled for visibility
+        print('depth: {}, normalised depth: {}'.format(depth, depth/max_depth))
         cv2.imshow('RGBD', image)
         cv2.waitKey(1)
 
@@ -117,6 +121,14 @@ if __name__ == '__main__':
 
         vis.poll_events()
         vis.update_renderer()
+
+    time = str(datetime.now()).replace(' ', '_')[:-7].replace(':', '-')
+
+    vis.capture_depth_image(filename='data/depth_images/original/depth_image_{}.png'.format(time),
+                            do_render=True)
+    vis.capture_depth_point_cloud(filename='data/point_clouds/binary/depth_point-cloud_{}.ply'.format(time),
+                                  do_render=True,
+                                  convert_to_world_coordinate=True)
 
     # Stop stream -------------------------------------------------------------
     sink_depth.detach()

@@ -17,7 +17,7 @@ import hl2ss
 # Settings --------------------------------------------------------------------
 
 # HoloLens address
-host = "192.168.1.7"
+host = "192.168.137.2"
 
 # Port
 port = hl2ss.StreamPort.RM_DEPTH_LONGTHROW
@@ -26,7 +26,7 @@ port = hl2ss.StreamPort.RM_DEPTH_LONGTHROW
 # 0: video
 # 1: video + rig pose
 # 2: query calibration (single transfer)
-mode = hl2ss.StreamMode.MODE_1
+mode = hl2ss.StreamMode.MODE_2
 
 # PNG filter
 png_filter = hl2ss.PngFilterMode.Paeth
