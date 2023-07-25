@@ -15,48 +15,83 @@ import cv2.aruco as aruco
     than other way around.
 """
 
+# Image time
+im_time = '2023-07-25_14-31-29'
+
 # HoloLens camera calibration
-pv_intrinsic = pd.read_csv('data/matrices/intrinsics_2023-07-20_17-01-23.csv', sep=',', header=None).values.T[:-1, :-1]
-pv_extrinsic = pd.read_csv('data/matrices/extrinsics_2023-07-20_17-01-23.csv', sep=',', header=None).values.T
-pv_pose = pd.read_csv('data/matrices/pv_pose_2023-07-20_17-01-23.csv', sep=',', header=None).values.T
-depth_intrinsic = pd.read_csv('data/matrices/LT_intrinsics_2023-07-20_17-01-23.csv', sep=',', header=None).values.T
-depth_extrinsic = pd.read_csv('data/matrices/LT_extrinsics_2023-07-20_17-01-23.csv', sep=',', header=None).values.T
-depth_pose = pd.read_csv('data/matrices/lt_pose_2023-07-20_17-01-23.csv', sep=',', header=None).values.T
+pv_intrinsic = pd.read_csv('data/matrices/intrinsics_{}.csv'.format(im_time), sep=',', header=None).values.T[:-1, :-1]
+pv_distort = np.array([0., 0., 0., 0., 0.])
+pv_extrinsic = pd.read_csv('data/matrices/extrinsics_{}.csv'.format(im_time), sep=',', header=None).values.T
+pv_pose = pd.read_csv('data/matrices/pv_pose_{}.csv'.format(im_time), sep=',', header=None).values.T
+depth_intrinsic = pd.read_csv('data/matrices/LT_intrinsics_{}.csv'.format(im_time), sep=',', header=None).values.T
+depth_extrinsic = pd.read_csv('data/matrices/LT_extrinsics_{}.csv'.format(im_time), sep=',', header=None).values.T
+depth_pose = pd.read_csv('data/matrices/lt_pose_{}.csv'.format(im_time), sep=',', header=None).values.T
+
 
 # 1. GENERATE CHARUCO BOARD AND THEIR OBJECT POINTS (IN BOARD COORDINATE SYSTEM)
 # Can convert to a class with methods later on.
 
 # ChArUco board specs (similar to calib.io)
-squaresX = 6  # no. of squares in X-direction
-squaresY = 6  # no. of squares in Y-direction
-# board_width = 0.20  # in m
-# board_height = 0.20  # in m
-square_length = 0.030  # in m
-marker_length = 0.023  # in m
-pixels_num_height = 600
-pixels_num_width = 600
+Board16x12 = {
+    'squares_x': 16,
+    'squares_y': 12,
+    'square_length': 0.016,  # in m
+    'marker_length': 0.012,  # in m
+    'num_px_height': 600,
+    'num_px_width': 600,
+    'aruco_dict': aruco.DICT_6X6_100
+}
 
-# Defining ArUco dictionary for markers
-aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_6X6_100)
-# aruco_dict.bytesList=aruco_dict.bytesList[30:,:,:]
+# For case of 12 x 9 squares.
+Board12x9 = {
+    'squares_x': 12,
+    'squares_y': 9,
+    'square_length': 0.022,  # in m
+    'marker_length': 0.017,  # in m
+    'num_px_height': 600,
+    'num_px_width': 600,
+    'aruco_dict': aruco.DICT_6X6_100
+}
+
+# For case of 9 by 7 squares
+Board9x7 = {
+    'squares_x': 9,
+    'squares_y': 7,
+    'square_length': 0.027,  # in m
+    'marker_length': 0.021,  # in m
+    'num_px_height': 600,
+    'num_px_width': 600,
+    'aruco_dict': aruco.DICT_6X6_100
+}
+
+# For case of 6 by 6 squares
+Board6x6 = {
+    'squares_x': 6,
+    'squares_y': 6,
+    'square_length': 0.030,  # in m
+    'marker_length': 0.023,  # in m
+    'num_px_height': 600,
+    'num_px_width': 600,
+    'aruco_dict': aruco.DICT_6X6_100
+}
 
 # Create ChArUco board and view it
+dim = Board16x12
+aruco_params = aruco.DetectorParameters_create()
+aruco_dict = aruco.getPredefinedDictionary(dim['aruco_dict'])
 board = aruco.CharucoBoard_create(
-    squaresX, squaresY, square_length, marker_length, aruco_dict)
-imboard = board.draw((pixels_num_height, pixels_num_width), 10, 1)
+    dim['squares_x'], dim['squares_y'],
+    dim['square_length'], dim['marker_length'], aruco_dict)
+
 
 # 2. DETECT CHARUCO BOARD CORNERS
 # Convert to function
 
 # Detect the markers in the image
-img = cv2.imread('data/rgb_images/20230720_170236_HoloLens.jpg')
+img = cv2.imread('data/rgb_images/20230725_143135_HoloLens.jpg')
 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-# cv2.imshow('Original image', cv2.resize(img, (960, 540)))
-# cv2.imshow('Gray image', cv2.resize(gray, (960, 540)))
-# cv2.waitKey(0)
-
-# Check for AruCo dictionary
-aruco_params = aruco.DetectorParameters_create()
+cv2.imshow('Gray image', cv2.resize(gray, (960, 540)))
+cv2.waitKey(0)
 
 # Detect the markers in the image
 img_corners, ids, rejected = aruco.detectMarkers(
@@ -83,17 +118,6 @@ if ids is not None:
         # Draw a circle at the center point
         cv2.circle(gray, tuple(centre.astype(int)), 3, (0, 255, 0), -1)
 
-    # Display the image with detected markers
-    cv2.namedWindow("Detected markers", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Detected markers", 1000, 1000)
-    cv2.imshow("Detected markers", debug_img)
-    # cv2.imshow("ChArUco board", imboard)
-    cv2.waitKey(0)
-    # cv2.destroyAllWindows()
-
-# Remove ArUco corners not detected in the image.
-board_corners = np.array(board.objPoints)
-board_ids = board.ids.tolist()
 
 # 3. OBTAIN POSE (RVEC AND TVEC) OF BOARD WITH RESPECT TO RGB CAMERA.
 outcome, rvecs, tvecs = aruco.estimatePoseCharucoBoard(
@@ -107,9 +131,12 @@ T_bc = np.hstack((rotation_mat, tvecs))
 projection = np.matmul(pv_intrinsic, T_bc)
 
 # Get corresponding image points of rigid base corners from measured positions in board coordinates.
-padding = 10
-board_points = np.array([[padding+77., 76.-padding, -3.], [padding+77., 106.-padding, -3.],
-    [padding+105., 106.-padding, -3.], [padding+105., 76.-padding, -3.]]) / 1000.
+centre = np.array([dim['squares_x']*dim['square_length'], dim['squares_y']*dim['square_length']])/2
+cube = 0.03
+board_points = np.array([[centre[0]-cube/2, centre[1]-cube/2, 0.003],
+                         [centre[0]-cube/2, centre[1]+cube/2, 0.003],
+                         [centre[0]+cube/2, centre[1]+cube/2, 0.003],
+                         [centre[0]+cube/2, centre[1]-cube/2, 0.003]])
 img_rigid_points = []
 img_points = []
 
@@ -118,20 +145,20 @@ for idx, corner in enumerate(board_points):
     img_points.append(transformed_point / transformed_point[-1])
     img_rigid_points.append(transformed_point)
     cv2.circle(img, tuple(img_points[idx][:-1].astype(int)),
-        radius=10, color=(0, 0, 255), thickness=-1)
+               radius=10, color=(0, 0, 255), thickness=-1)
 
 # Display pose of board with respect to RGB camera
-cv2.drawFrameAxes(debug_img, cameraMatrix=pv_intrinsic, distCoeffs=None,
-                  rvec=rvecs, tvec=tvecs, length=0.02, thickness=10)
+cv2.drawFrameAxes(debug_img, cameraMatrix=pv_intrinsic, distCoeffs=pv_distort,
+                  rvec=rvecs, tvec=tvecs, length=0.03, thickness=5)
 cv2.namedWindow("Board pose", cv2.WINDOW_NORMAL)
-cv2.resizeWindow("Board pose", 1000, 1000)
+cv2.resizeWindow("Board pose", 960, 540)
 cv2.imshow("Board pose", debug_img)
 cv2.waitKey(0)
 
-# Finding colour to depth transformation
-T_cd = np.matmul(depth_extrinsic, np.linalg.inv(pv_extrinsic))
-
-# Going straight from board to depth
-T_bd = np.matmul(T_cd, np.vstack((T_bc,[0., 0., 0., 1.])))
-depth = np.matmul(T_bd[:-1, :], board_points[0])
-print(depth)
+# # Finding colour to depth transformation
+# T_cd = np.matmul(depth_extrinsic, np.linalg.inv(pv_extrinsic))
+#
+# # Going straight from board to depth
+# T_bd = np.matmul(T_cd, np.vstack((T_bc, [0., 0., 0., 1.])))
+# depth = np.matmul(T_bd[:-1, :], board_points[0])
+# print(depth)
