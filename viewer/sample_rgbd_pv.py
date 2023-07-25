@@ -27,8 +27,8 @@ if not os.path.exists(calibration_path):
     os.mkdir(calibration_path)
 
 # Front RGB camera parameters
-width = 640
-height = 360
+width = 1920
+height = 1080
 framerate = 30
 
 # Video encoding profile
@@ -60,6 +60,10 @@ if __name__ == '__main__':
 
     # Start PV Subsystem ------------------------------------------------------
     hl2ss.start_subsystem_pv(host, hl2ss.StreamPort.PERSONAL_VIDEO)
+
+    # Get PV calibration and lens distortion info
+    calibration_pv = hl2ss.download_calibration_pv(host=host, port=hl2ss.StreamPort.PERSONAL_VIDEO,
+                                                   width=width, height=height, framerate=framerate)
 
     # Get RM Depth Long Throw calibration -------------------------------------
     # Calibration data will be downloaded if it's not in the calibration folder
@@ -118,9 +122,13 @@ if __name__ == '__main__':
 
         # Update PV intrinsics ------------------------------------------------
         # PV intrinsics may change between frames due to autofocus
-        pv_intrinsics = hl2ss.update_pv_intrinsics(pv_intrinsics, data_pv.payload.focal_length, data_pv.payload.principal_point)
+        pv_intrinsics = hl2ss.update_pv_intrinsics(pv_intrinsics, data_pv.payload.focal_length,
+                            data_pv.payload.principal_point)
         color_intrinsics, color_extrinsics = hl2ss_3dcv.pv_fix_calibration(pv_intrinsics, pv_extrinsics)
-        
+        pv_distortion = np.array([calibration_pv.radial_distortion[0], calibration_pv.radial_distortion[1],
+                            calibration_pv.tangential_distortion[0], calibration_pv.tangential_distortion[1],
+                            calibration_pv.radial_distortion[2]])
+
         # Generate aligned RGBD image -----------------------------------------
         lt_points         = hl2ss_3dcv.rm_depth_to_points(xy1, depth)
         lt_to_world       = hl2ss_3dcv.camera_to_rignode(calibration_lt.extrinsics) @ hl2ss_3dcv.reference_to_world(data_lt.pose)
@@ -202,6 +210,9 @@ if __name__ == '__main__':
     with open('data/matrices/intrinsics_{}.csv'.format(time), 'w', newline='') as intrinsics:
         writer = csv.writer(intrinsics)
         writer.writerows(np.asarray(color_intrinsics))
+    with open('data/matrices/distortion_{}.csv'.format(time), 'w', newline='') as distortion:
+        writer = csv.writer(distortion)
+        writer.writerows(np.asarray(pv_distortion))
     with open('data/matrices/LT_extrinsics_{}.csv'.format(time), 'w', newline='') as lt_extrinsics:
         writer = csv.writer(lt_extrinsics)
         writer.writerows(np.asarray(calibration_lt.extrinsics))
