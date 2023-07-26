@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import cv2  # OpenCV version was 4.4
-import cv2.aruco as aruco
 
 """
 - We don't want the marker corners for pose estimation. We use them to interpolate the position of 
@@ -19,14 +18,19 @@ import cv2.aruco as aruco
 im_time = '2023-07-25_14-31-29'
 
 # HoloLens camera calibration
-pv_intrinsic = pd.read_csv('data/matrices/intrinsics_{}.csv'.format(im_time), sep=',', header=None).values.T[:-1, :-1]
+pv_intrinsic = pd.read_csv('data/matrices/intrinsics_{}.csv'.format(im_time),
+                           sep=',', header=None).values.T[:-1, :-1]
 pv_distort = np.array([0., 0., 0., 0., 0.])
-pv_extrinsic = pd.read_csv('data/matrices/extrinsics_{}.csv'.format(im_time), sep=',', header=None).values.T
-pv_pose = pd.read_csv('data/matrices/pv_pose_{}.csv'.format(im_time), sep=',', header=None).values.T
-depth_intrinsic = pd.read_csv('data/matrices/LT_intrinsics_{}.csv'.format(im_time), sep=',', header=None).values.T
-depth_extrinsic = pd.read_csv('data/matrices/LT_extrinsics_{}.csv'.format(im_time), sep=',', header=None).values.T
-depth_pose = pd.read_csv('data/matrices/lt_pose_{}.csv'.format(im_time), sep=',', header=None).values.T
-
+pv_extrinsic = pd.read_csv('data/matrices/extrinsics_{}.csv'.format(im_time),
+                           sep=',', header=None).values.T
+pv_pose = pd.read_csv('data/matrices/pv_pose_{}.csv'.format(im_time),
+                      sep=',', header=None).values.T
+depth_intrinsic = pd.read_csv('data/matrices/LT_intrinsics_{}.csv'.format(im_time),
+                              sep=',', header=None).values.T
+depth_extrinsic = pd.read_csv('data/matrices/LT_extrinsics_{}.csv'.format(im_time),
+                              sep=',', header=None).values.T
+depth_pose = pd.read_csv('data/matrices/lt_pose_{}.csv'.format(im_time),
+                         sep=',', header=None).values.T
 
 # 1. GENERATE CHARUCO BOARD AND THEIR OBJECT POINTS (IN BOARD COORDINATE SYSTEM)
 # Can convert to a class with methods later on.
@@ -39,7 +43,7 @@ Board16x12 = {
     'marker_length': 0.012,  # in m
     'num_px_height': 600,
     'num_px_width': 600,
-    'aruco_dict': aruco.DICT_6X6_100
+    'aruco_dict': cv2.aruco.DICT_6X6_100
 }
 
 # For case of 12 x 9 squares.
@@ -50,7 +54,7 @@ Board12x9 = {
     'marker_length': 0.017,  # in m
     'num_px_height': 600,
     'num_px_width': 600,
-    'aruco_dict': aruco.DICT_6X6_100
+    'aruco_dict': cv2.aruco.DICT_6X6_100
 }
 
 # For case of 9 by 7 squares
@@ -61,7 +65,7 @@ Board9x7 = {
     'marker_length': 0.021,  # in m
     'num_px_height': 600,
     'num_px_width': 600,
-    'aruco_dict': aruco.DICT_6X6_100
+    'aruco_dict': cv2.aruco.DICT_6X6_100
 }
 
 # For case of 6 by 6 squares
@@ -72,17 +76,16 @@ Board6x6 = {
     'marker_length': 0.023,  # in m
     'num_px_height': 600,
     'num_px_width': 600,
-    'aruco_dict': aruco.DICT_6X6_100
+    'aruco_dict': cv2.aruco.DICT_6X6_100
 }
 
 # Create ChArUco board and view it
 dim = Board16x12
-aruco_params = aruco.DetectorParameters_create()
-aruco_dict = aruco.getPredefinedDictionary(dim['aruco_dict'])
-board = aruco.CharucoBoard_create(
+aruco_params = cv2.aruco.DetectorParameters_create()
+aruco_dict = cv2.aruco.getPredefinedDictionary(dim['aruco_dict'])
+board = cv2.aruco.CharucoBoard_create(
     dim['squares_x'], dim['squares_y'],
     dim['square_length'], dim['marker_length'], aruco_dict)
-
 
 # 2. DETECT CHARUCO BOARD CORNERS
 # Convert to function
@@ -94,18 +97,18 @@ cv2.imshow('Gray image', cv2.resize(gray, (960, 540)))
 cv2.waitKey(0)
 
 # Detect the markers in the image
-img_corners, ids, rejected = aruco.detectMarkers(
+img_corners, ids, rejected = cv2.aruco.detectMarkers(
     gray, aruco_dict, parameters=aruco_params)
 
 #   Interpolate position of ChArUco board corners.
-_, charuco_corners, charuco_id = aruco.interpolateCornersCharuco(
+_, charuco_corners, charuco_id = cv2.aruco.interpolateCornersCharuco(
     img_corners, ids, gray, board, cameraMatrix=None, distCoeffs=None)
 
 # Draw detected markers on the image
-debug_img = aruco.drawDetectedMarkers(img, img_corners, ids)
+debug_img = cv2.aruco.drawDetectedMarkers(img, img_corners, ids)
 
 # Draw detected corners on markers
-aruco.drawDetectedCornersCharuco(debug_img, charuco_corners, charuco_id, (0, 0, 255))
+cv2.aruco.drawDetectedCornersCharuco(debug_img, charuco_corners, charuco_id, (0, 0, 255))
 plt.imshow(debug_img)
 plt.show()
 
@@ -118,9 +121,8 @@ if ids is not None:
         # Draw a circle at the center point
         cv2.circle(gray, tuple(centre.astype(int)), 3, (0, 255, 0), -1)
 
-
 # 3. OBTAIN POSE (RVEC AND TVEC) OF BOARD WITH RESPECT TO RGB CAMERA.
-outcome, rvecs, tvecs = aruco.estimatePoseCharucoBoard(
+outcome, rvecs, tvecs = cv2.aruco.estimatePoseCharucoBoard(
     charucoCorners=charuco_corners, charucoIds=charuco_id,
     board=board, cameraMatrix=pv_intrinsic, distCoeffs=None,
     rvec=None, tvec=None)
@@ -128,24 +130,25 @@ outcome, rvecs, tvecs = aruco.estimatePoseCharucoBoard(
 # Get rotation and pose (rotation + translation) matrices
 rotation_mat, _ = cv2.Rodrigues(rvecs)
 T_bc = np.hstack((rotation_mat, tvecs))
-projection = np.matmul(pv_intrinsic, T_bc)
+project_bc = np.matmul(pv_intrinsic, T_bc)
 
 # Get corresponding image points of rigid base corners from measured positions in board coordinates.
-centre = np.array([dim['squares_x']*dim['square_length'], dim['squares_y']*dim['square_length']])/2
+centre = np.array([dim['squares_x'] * dim['square_length'],
+                   dim['squares_y'] * dim['square_length']]) / 2
 cube = 0.03
-board_points = np.array([[centre[0]-cube/2, centre[1]-cube/2, 0.003],
-                         [centre[0]-cube/2, centre[1]+cube/2, 0.003],
-                         [centre[0]+cube/2, centre[1]+cube/2, 0.003],
-                         [centre[0]+cube/2, centre[1]-cube/2, 0.003]])
+board_points = np.array([[centre[0] - cube / 2, centre[1] - cube / 2, -0.003],
+                         [centre[0] - cube / 2, centre[1] + cube / 2, -0.003],
+                         [centre[0] + cube / 2, centre[1] + cube / 2, -0.003],
+                         [centre[0] + cube / 2, centre[1] - cube / 2, -0.003]])
 img_rigid_points = []
 img_points = []
 
 for idx, corner in enumerate(board_points):
-    transformed_point = np.matmul(projection, np.hstack((corner, 1.)))
+    transformed_point = np.matmul(project_bc, np.hstack((corner, 1.)))
     img_points.append(transformed_point / transformed_point[-1])
     img_rigid_points.append(transformed_point)
     cv2.circle(img, tuple(img_points[idx][:-1].astype(int)),
-               radius=10, color=(0, 0, 255), thickness=-1)
+               radius=5, color=(255, 255, 0), thickness=-1)
 
 # Display pose of board with respect to RGB camera
 cv2.drawFrameAxes(debug_img, cameraMatrix=pv_intrinsic, distCoeffs=pv_distort,
@@ -155,10 +158,21 @@ cv2.resizeWindow("Board pose", 960, 540)
 cv2.imshow("Board pose", debug_img)
 cv2.waitKey(0)
 
-# # Finding colour to depth transformation
-# T_cd = np.matmul(depth_extrinsic, np.linalg.inv(pv_extrinsic))
-#
-# # Going straight from board to depth
-# T_bd = np.matmul(T_cd, np.vstack((T_bc, [0., 0., 0., 1.])))
-# depth = np.matmul(T_bd[:-1, :], board_points[0])
-# print(depth)
+# 4. BOARD TO DEPTH SPACE
+
+# Finding colour to depth transformation
+T_cd = np.matmul(depth_extrinsic, np.linalg.inv(pv_extrinsic))
+
+# Going straight from board to depth
+T_bd = np.matmul(T_cd, np.vstack((T_bc, [0., 0., 0., 1.])))
+depth = np.matmul(T_bd[:-1, :], np.hstack((board_points,
+                                           np.ones(shape=(len(board_points), 1)))).T)
+
+# 5. TRANSFORM DEPTH DATA TO SHARED COORDINATE SYSTEM (BOARD COORDINATE SPACE)
+depth_raw = pd.read_csv('data/points/lt_{}.csv'.format(im_time), sep=',', header=None).values
+depth_data = np.array([np.hstack((np.fromstring(element[1:-1], sep=' '), 1.))
+                       for px in depth_raw for element in px]).reshape(-1, depth_raw.shape[1], 4)
+depth_to_board = np.zeros((depth_raw.shape[0], depth_raw.shape[1], 3))
+depth_to_board = np.array([np.matmul(np.linalg.inv(T_bd)[:-1, :], depth_data[px_x, px_y, :].T).T
+                           for px_y in range(depth_data.shape[1]) for px_x in range(depth_data.shape[0])])\
+                            .reshape(-1, depth_data.shape[1], 3)

@@ -61,7 +61,7 @@ if (mode == hl2ss.StreamMode.MODE_2):
     print(f'Radial distortion: {data.radial_distortion}')
     print(f'Tangential distortion: {data.tangential_distortion}')
     print('Projection')
-    print(data.projection)
+    print(data.project_bc)
     print('Intrinsics')
     print(data.intrinsics)
 else:

@@ -289,7 +289,7 @@ def _save_calibration_pv(calibration, path):
     calibration.principal_point      .tofile(os.path.join(path, 'principal_point.bin'))
     calibration.radial_distortion    .tofile(os.path.join(path, 'radial_distortion.bin'))
     calibration.tangential_distortion.tofile(os.path.join(path, 'tangential_distortion.bin'))
-    calibration.projection           .tofile(os.path.join(path, 'projection.bin'))
+    calibration.project_bc           .tofile(os.path.join(path, 'project_bc.bin'))
     calibration.intrinsics           .tofile(os.path.join(path, 'intrinsics.bin'))
 
 
@@ -344,7 +344,7 @@ def _load_calibration_pv(path):
     principal_point       = np.fromfile(os.path.join(path, 'principal_point.bin'),       dtype=np.float32)
     radial_distortion     = np.fromfile(os.path.join(path, 'radial_distortion.bin'),     dtype=np.float32)
     tangential_distortion = np.fromfile(os.path.join(path, 'tangential_distortion.bin'), dtype=np.float32)
-    projection            = np.fromfile(os.path.join(path, 'projection.bin'),            dtype=np.float32).reshape((4, 4))
+    projection            = np.fromfile(os.path.join(path, 'project_bc.bin'),            dtype=np.float32).reshape((4, 4))
     intrinsics            = np.fromfile(os.path.join(path, 'intrinsics.bin'),            dtype=np.float32).reshape((4, 4))
 
     return hl2ss._Mode2_PV(focal_length, principal_point, radial_distortion, tangential_distortion, projection, intrinsics)
@@ -427,7 +427,7 @@ def _load_calibration_rm(port, path):
 
 class _Mode2_PV(hl2ss._Mode2_PV):
     def __init__(self, mode2, extrinsics):
-        super().__init__(mode2.focal_length, mode2.principal_point, mode2.radial_distortion, mode2.tangential_distortion, mode2.projection, mode2.intrinsics)
+        super().__init__(mode2.focal_length, mode2.principal_point, mode2.radial_distortion, mode2.tangential_distortion, mode2.project_bc, mode2.intrinsics)
         self.extrinsics = extrinsics
 
 
