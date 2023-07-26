@@ -53,12 +53,6 @@ def select_points(event, x, y, flags, param):
 fig = plt.figure()
 cid = fig.canvas.mpl_connect('button_press_event', mouse_event)
 
-plt.imshow(colormapped_im)
-plt.xlabel('pixel along column (v)')
-plt.ylabel('pixel along row (u)')
-plt.colorbar(mapper)
-plt.show()
-
 ##  2. FITTING VECTOR TO DEPTH DATA OF PLUMB BOB
 data = np.array([[188.94545454545445, 109.94155844155844],
                  [187.6467532467532, 127.08441558441558],
@@ -69,6 +63,13 @@ data = np.array([[188.94545454545445, 109.94155844155844],
 u_data = data[:, 1]
 v_data = data[:, 0]
 
+plt.imshow(colormapped_im)
+plt.colorbar(mapper)
+plt.scatter(v_data, u_data, s=30., color='black')
+plt.xlabel('pixel along column (v)')
+plt.ylabel('pixel along row (u)')
+plt.title('depth image')
+plt.show()
 
 #   We are fitting a straight line, so need a linear function
 def linear_function(x, m, c):
@@ -76,17 +77,33 @@ def linear_function(x, m, c):
 
 
 #  Fit data to a curve using non-linear squares fit
-popt, _ = scipy.optimize.curve_fit(linear_function, v_data, u_data)
-fitted_u = linear_function(v_data, *popt)
+popt_u, _ = scipy.optimize.curve_fit(linear_function, v_data, u_data)
+fitted_u = linear_function(v_data, *popt_u)
+
+popt_v, _ = scipy.optimize.curve_fit(linear_function, u_data, v_data)
+fitted_v = linear_function(u_data, *popt_v)
 
 #  Visualise fitted line
 plt.imshow(colormapped_im)
-plt.scatter(v_data, u_data, color='red', label='selected points')
-plt.plot(v_data, fitted_u, linewidth=3, color='black', label='fitted vector')
-# plt.arrow(v_data.min(), fitted_u.max(),
-#           (v_data.max() - v_data.max()),
-#           (fitted_u.max() - fitted_u.max()),
-#           width = 0.1, color='black', label='arrow')
+plt.scatter(v_data, u_data, s=30., color='black', label='selected points')
+
+# arrow_tail_idx = np.argmin(fitted_u)
+# arrow_head_idx = np.argmax(fitted_u)
+#
+# plt.arrow(v_data[arrow_tail_idx], fitted_u.min(),
+#       (v_data[arrow_head_idx] - v_data[arrow_tail_idx]),
+#       (fitted_u.max() - fitted_u.min()),
+#       width=1.2, color='pink', label='fitted vector (fit u)')
+
+arrow_tail_idx = np.argmin(u_data)
+arrow_head_idx = np.argmax(u_data)
+
+plt.arrow(fitted_v[arrow_tail_idx], u_data.min(),
+          (fitted_v[arrow_head_idx] - fitted_v[arrow_tail_idx]),
+          (u_data.max() - u_data.min()), linestyle = '--',
+          width=1., color='orange', label='fitted vector (fit v)')
+
+plt.title('Identified direction of gravity vector in depth image')
 plt.xlabel('pixel along column (v)')
 plt.ylabel('pixel along row (u)')
 plt.legend()
