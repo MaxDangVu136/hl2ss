@@ -174,7 +174,7 @@ if __name__ == '__main__':
     #vis.capture_screen_image(filename='data/rgb_images/rgb_{}.png'.format(time))
     vis.capture_depth_image(filename='data/depth_images/original/depth_image_{}.png'.format(time), do_render=True)
     vis.capture_depth_point_cloud(filename='data/point_clouds/binary/depth_point-cloud_{}.ply'.format(time),
-                                  do_render=True, convert_to_world_coordinate=True)
+                                  do_render=True, convert_to_world_coordinate=False)
 
     with open('data/points/depth_{}.csv'.format(time), 'w', newline='') as depth_file:
         writer = csv.writer(depth_file)
