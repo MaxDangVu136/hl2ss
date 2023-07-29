@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import cv2  # OpenCV version was 4.4
 import open3d as o3d
@@ -189,48 +190,62 @@ colour_depth_board = (np.linalg.inv(T_bd) @ colour_depth_homogenous).T[:, :-1]
 
 # 5. TRANSFORM DEPTH DATA TO SHARED COORDINATE SYSTEM (BOARD COORDINATE SPACE)
 
-# Depth point cloud
+# Convert point cloud from HoloLens coordinate system to depth coordinates
 pcd = o3d.io.read_point_cloud('data/point_clouds/binary/'
                               'depth_point-cloud_{}.ply'.format(im_time))
-depth_pcd = np.asarray(pcd.points)
-depth_pcd_h = np.hstack((depth_pcd, np.ones(shape=(depth_pcd.shape[0], 1)))).T
-depth_to_board_h = np.linalg.inv(T_bd) @ depth_pcd_h
-depth_to_board = (depth_to_board_h[:-1, :]/depth_pcd_h[-1, :]).T
+world_pcd = np.asarray(pcd.points)
+world_pcd_h = np.hstack((world_pcd, np.ones(shape=(world_pcd.shape[0], 1)))).T
+world_to_depth_h = T_hd @ world_pcd_h
+world_to_depth = (world_to_depth_h[:-1, :]/world_to_depth_h[-1, :]).T
+depth_est = world_to_depth[:, -1]
+
+# Depth to board coordinates
+depth_to_board_h = np.linalg.inv(T_bd) @ world_to_depth_h
+depth_to_board = (depth_to_board_h[:-1, :]/depth_to_board_h[-1, :]).T
 
 # Using depth map
-U, V = np.meshgrid(np.array([list(range(1, depth_map.shape[0] + 1))]),
-                   np.array([list(range(1, depth_map.shape[1] + 1))]))
-print(U.reshape(-1, 1))
-print(V.reshape(-1, 1))
+U, V = np.meshgrid(np.array([list(range(1, depth_map.shape[1] + 1))]),
+                   np.array([list(range(depth_map.shape[0], 0, -1))]))
 depth_img = np.array([U.reshape(-1, 1), V.reshape(-1, 1), depth_map.reshape(-1, 1)]).T.reshape(-1, 3)
 depth_img_h = np.hstack((depth_img, np.ones(shape=(depth_img.shape[0], 1)))).T
 depth_map_to_board = np.linalg.inv(T_bd) @ depth_img_h
 depth_map_to_board =(depth_map_to_board[:-1, :]/depth_map_to_board[-1, :]).T
 
+# Normalise colourbar
+color = 'magma'
+normalizer = mpl.colors.Normalize(vmin=depth_map.min(), vmax=depth_map.max())
+mapper = mpl.cm.ScalarMappable(norm=normalizer, cmap=color)
+
 # Compare depth to board transformed data vs original depth data
 fig = plt.figure()
 
-ax_db = fig.add_subplot(1, 2, 1, projection='3d')
-scatter_db = ax_db.scatter(depth_to_board[:, 0], depth_to_board[:, 1],
-                           depth_to_board[:, 2], c=depth_to_board[:, 2], cmap='magma')
-cbar_db = fig.colorbar(scatter_db, ax=ax_db)
-cbar_db.set_label('depth estimate')
-ax_db.set_xlabel('x')
-ax_db.set_ylabel('y')
-ax_db.set_zlabel('z')
-ax_db.set_title('Depth map to board transformation')
-
-ax_d = fig.add_subplot(1, 2, 2, projection='3d')
-scatter_d = ax_d.scatter(depth_pcd[:, 0], depth_pcd[:, 1],
-                         depth_pcd[:, 2], c=depth_pcd[:, 2], cmap='magma')
-cbar_d = fig.colorbar(scatter_d, ax=ax_d)
-cbar_d.set_label('depth estimate')
-ax_d.set_xlabel('x')
-ax_d.set_ylabel('y')
-ax_d.set_zlabel('z')
-ax_d.set_title('Depth data')
-
+plt.contourf(U, V, depth_map, cmap=color, origin='upper')
+plt.xlabel('u')
+plt.ylabel('v')
+plt.colorbar(mapper)
 plt.show()
+
+# ax_db = fig.add_subplot(1, 2, 1, projection='3d')
+# scatter_db = ax_db.scatter(depth_map_to_board[:, 0], depth_map_to_board[:, 1],
+#                            depth_map_to_board[:, 2], c=depth_map_to_board[:, 2], cmap='magma')
+# cbar_db = fig.colorbar(scatter_db, ax=ax_db)
+# cbar_db.set_label('depth estimate')
+# ax_db.set_xlabel('x')
+# ax_db.set_ylabel('y')
+# ax_db.set_zlabel('z')
+# ax_db.set_title('Depth map to board transformation')
+#
+# ax_d = fig.add_subplot(1, 2, 2, projection='3d')
+# scatter_d = ax_d.scatter(world_pcd[:, 0], world_pcd[:, 1],
+#                          world_pcd[:, 2], c=world_pcd[:, 2], cmap='magma')
+# cbar_d = fig.colorbar(scatter_d, ax=ax_d)
+# cbar_d.set_label('depth estimate')
+# ax_d.set_xlabel('x')
+# ax_d.set_ylabel('y')
+# ax_d.set_zlabel('z')
+# ax_d.set_title('Depth data')
+#
+# plt.show()
 
 
 ## 6. COMPUTE EULER ANGLE FROM T_BD
