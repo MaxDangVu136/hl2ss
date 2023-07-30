@@ -69,6 +69,7 @@ def get_depth_map(time):
         Estimated depth of a point at a given pixel in the depth camera frame.
 
     """
+
     path = 'data/points/depth_{}.csv'.format(time)
     depth_values = pd.read_csv(path, sep=',', header=None).values
 
@@ -95,6 +96,7 @@ def generate_charuco_board(specs):
         Dictionary for a set of unique ArUco markers of the same size.
 
     """
+
     aruco_param = cv2.aruco.DetectorParameters_create()
     aruco_dict = cv2.aruco.getPredefinedDictionary(specs['aruco_dict'])
     charuco_board = cv2.aruco.CharucoBoard_create(
@@ -102,6 +104,59 @@ def generate_charuco_board(specs):
         specs['square_length'], specs['marker_length'], aruco_dict)
 
     return charuco_board, aruco_param, aruco_dict
+
+
+def detect_display_markers(charuco_board, img, aruco_dict, aruco_param, cam_mtx, dist_coeffs):
+    """
+    This function detects and displays ChArUco markers found in an RGB image frame.
+
+    Parameters
+    ---------
+    charuco_board: aruco_CharucoBoard
+        Charuco board object containing coordinates of Chessboard corners, marker IDs and
+        corner points of markers in board coordinate space.
+    img: array
+        m x n x 3 RGB image.
+    aruco_dict: dictionary
+        Dictionary for a set of unique ArUco markers of the same size.
+    aruco_param: aruco_DetectorParameters
+        ArUco parameters to enable ArUco marker detection.
+    cam_mtx: array
+        4x4 calibration matrix of the RGB camera, containing the camera's focal length and principal point.
+    dist_coeffs: array
+        1x5 matrix containing the RGB camera lens' radial and tangential distortion.
+
+    Returns
+    -------
+    debug_img: array
+        m x n x 3 RGB image overlaid with interpolated ChArUco corners and marker ids.
+    img_corners: list
+        Position of ArUco marker corners in the RGB image.
+    ids: array
+        Ids of detected ArUco markers in the image.
+    chessboard_corners: array
+        Interpolated position of chessboard corners in the RGB image.
+    chessboard_id: array
+        Ids of detected chessboard corners in the image.
+    """
+
+    # Convert img from rgb to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    plt.imshow(gray, cmap='gray')
+    plt.title('RGB image with Charuco board')
+    plt.show()
+
+    # Detect the markers in the image
+    (img_corners, ids, rejected) = cv2.aruco.detectMarkers(gray, aruco_dict, parameters=aruco_param)
+
+    # Interpolate position of ChArUco board corners
+    _, chessboard_corners, chessboard_id = cv2.aruco.interpolateCornersCharuco(
+        img_corners, ids, gray, charuco_board, cam_mtx, dist_coeffs)
+
+    # Draw detected markers on the image
+    debug_img = cv2.aruco.drawDetectedMarkers(img, img_corners, ids)
+
+    return gray, debug_img, img_corners, ids, chessboard_corners, chessboard_id
 
 
 def CharucoBoard_to_HoloLensRGB(rvec, tvec, pv_intrinsic):
@@ -123,6 +178,7 @@ def CharucoBoard_to_HoloLensRGB(rvec, tvec, pv_intrinsic):
         4x4 transformation matrix from board coordinates to RGB camera space.
 
     """
+
     rotation_mat, _ = cv2.Rodrigues(rvec)
     pose_bc = np.hstack((rotation_mat, tvec))
     t_bc = pv_intrinsic @ pose_bc
@@ -130,22 +186,50 @@ def CharucoBoard_to_HoloLensRGB(rvec, tvec, pv_intrinsic):
     return t_bc
 
 
-def homogeneous_coordinates(points):
+def homogeneous_coordinates(points, stack):
+    """
+    This function adds n columns of 1's to a 2D array to perform transformation from space X to space Y.
+
+    Parameters
+    ---------
+    points: array
+        n x 3 array of coordinates
+    stack: str
+        'column' means stacking a new array to existing array horizontally (i.e. adding columns)
+        'row' means stacking a new array to existing array vertically (i.e. adding rows)
+
+    Returns
+    -------
+    np.hstack((points, np.ones(shape=(points.shape[0], 1)))).T
+        n x 4 array of coordinates, where the last column is only 1's
     """
 
-    :param points:
-    :return:
-    """
-    return np.hstack((points, np.ones(shape=(points.shape[0], 1)))).T
+    if stack == 'column':
+        return np.hstack((points, np.ones(shape=(points.shape[0], 1))))
+
+    elif stack == 'row':
+        return np.vstack((points, np.ones(shape=(1, points.shape[1]))))
 
 
 def rigid_base_corners_on_board(board_spec, cube_size):
     """
+    This function computes the position of the rigid base corners of the cantilever beam in board coordinates.
 
-    :param board_spec:
-    :param cube_size:
-    :return:
+    Parameters
+    ---------
+    board_spec: dictionary
+        Contains the specifications to create a ChArUco board of m squares by n squares.
+
+    cube_size: float
+        Dimensions of the square cross-section of the cantilever beam attached to the rigid base.
+
+    Return
+    ------
+    homogeneous_coordinates(board_points)
+        4 x n array of rigid base coordinates in board space, where the last column is only 1's.
+
     """
+
     centre_pt = np.array([board_spec['squares_x'] * board_spec['square_length'],
                           board_spec['squares_y'] * board_spec['square_length']]) / 2
     board_points = np.array([[centre_pt[0] - cube_size / 2, centre_pt[1] - cube_size / 2, -0.003],
@@ -153,16 +237,28 @@ def rigid_base_corners_on_board(board_spec, cube_size):
                              [centre_pt[0] + cube_size / 2, centre_pt[1] + cube_size / 2, -0.003],
                              [centre_pt[0] + cube_size / 2, centre_pt[1] - cube_size / 2, -0.003]])
 
-    return homogeneous_coordinates(board_points)
+    return homogeneous_coordinates(board_points, 'column').T
 
 
 def transform_from_X_to_Y(t_mtx, x_h):
     """
+    This function transforms a set of points from X coordinate space to Y coordinate space.
 
-    :param t_mtx:
-    :param x_h:
-    :return:
+    Parameters
+    ---------
+    t_mtx: array
+        4 x 4 transformation matrix from space X to Y.
+    x_h: array
+        4 x n array of homogeneous coordinates in X space.
+
+    Returns
+    -------
+    y: array
+        n x 3 array of coordinates in Y space.
+    y_h: array
+        4 x n array of homogeneous coordinates in Y space.
     """
+
     y_h = t_mtx @ x_h
     y = (y_h[:-1, :] / y_h[-1, :]).T
 
@@ -248,7 +344,7 @@ def rotation_angles(matrix, order):
     return theta1, theta2, theta3
 
 
-# ChArUco board specs
+# ChArUco board specs (m squares x n squares)
 Board16x12 = {
     'squares_x': 16,
     'squares_y': 12,
@@ -289,78 +385,56 @@ Board6x6 = {
 if __name__ == "__main__":
 
     # 0. LOADING RELEVANT IMAGES
-    im_time = '2023-07-25_14-31-29'
-    rgb_intrinsic, rgb_distort, rgb_extrinsic, rgb_pose, depth_intrinsic, depth_extrinsic, depth_pose = \
-        load_hololens_matrices_at_time(im_time)
-    depth_map = get_depth_map(im_time)
     rgb_img = cv2.imread('data/rgb_images/20230725_143135_HoloLens.jpg')
-
+    rgb_intrinsic, rgb_distort, rgb_extrinsic, rgb_pose, depth_intrinsic, depth_extrinsic, depth_pose = \
+        load_hololens_matrices_at_time(time='2023-07-25_14-31-29')
+    depth_map = get_depth_map(time='2023-07-25_14-31-29')
     # ----------
+
     # 1. GENERATE CHARUCO BOARD AND THEIR OBJECT POINTS (IN BOARD COORDINATE SYSTEM)
     board_specs = Board16x12
     board, aruco_params, aruco_dictionary = generate_charuco_board(specs=board_specs)
-
     # ----------
+
     # 2. DETECT CHARUCO BOARD CORNERS
-
-    # Show Charuco board image
-    gray = cv2.cvtColor(rgb_img, cv2.COLOR_BGR2GRAY)
-    plt.imshow(gray, cmap='gray')
-    plt.title('RGB image with Charuco board')
-    plt.show()
-
-    # Detect the markers in the image
-    img_corners, ids, rejected = cv2.aruco.detectMarkers(
-        gray, aruco_dictionary, parameters=aruco_params)
-
-    # Interpolate position of ChArUco board corners
-    _, charuco_corners, charuco_id = cv2.aruco.interpolateCornersCharuco(
-        img_corners, ids, gray, board, cameraMatrix=rgb_intrinsic, distCoeffs=rgb_distort)
-
-    # Draw detected markers on the image
-    debug_img = cv2.aruco.drawDetectedMarkers(rgb_img, img_corners, ids)
+    gray_img, overlay_img, aruco_corners, aruco_ids, charuco_corners, charuco_ids = detect_display_markers(
+        charuco_board=board, img=rgb_img, aruco_dict=aruco_dictionary, aruco_param=aruco_params,
+        cam_mtx=rgb_intrinsic, dist_coeffs=rgb_distort)
 
     # Draw detected corners on markers
-    cv2.aruco.drawDetectedCornersCharuco(debug_img, charuco_corners, charuco_id, (0, 0, 255))
-    plt.imshow(debug_img)
+    cv2.aruco.drawDetectedCornersCharuco(overlay_img, charuco_corners, charuco_ids, (0, 0, 255))
+    plt.imshow(overlay_img)
     plt.title('Charuco corners and ids detected')
     plt.show()
 
     # Print the IDs and corner coordinates of the detected markers
-    if ids is not None:
-        for i in range(len(ids)):
-            # Calculate centre point
-            centre = np.mean(img_corners[i][0], axis=0)
-
-            # Draw a circle at the center point
-            cv2.circle(gray, tuple(centre.astype(int)), 3, (0, 255, 0), -1)
-
+    if aruco_ids is not None:
+        centres = [np.mean(aruco_corners[i][0], axis=0) for i in range(len(aruco_ids))]
+        [cv2.circle(gray_img, tuple(centre), 3, (0, 255, 0), -1) for centre in centres]
     # ----------
+
     # 3. OBTAIN POSE (RVEC AND TVEC) OF BOARD WITH RESPECT TO RGB CAMERA.
     outcome, rvecs, tvecs = cv2.aruco.estimatePoseCharucoBoard(
-        charucoCorners=charuco_corners, charucoIds=charuco_id, board=board,
+        charucoCorners=charuco_corners, charucoIds=charuco_ids, board=board,
         cameraMatrix=rgb_intrinsic, distCoeffs=rgb_distort, rvec=None, tvec=None)
 
-    # Get rotation and pose (rotation + translation) matrices
-    T_bc = CharucoBoard_to_HoloLensRGB(rvec=rvecs, tvec=tvecs, pv_intrinsic=rgb_intrinsic)
-
     # Get corresponding image points of rigid base corners from measured positions in board coordinates.
+    T_bc = CharucoBoard_to_HoloLensRGB(rvec=rvecs, tvec=tvecs, pv_intrinsic=rgb_intrinsic)
     board_points_h = rigid_base_corners_on_board(board_spec=board_specs, cube_size=0.030)
 
     # Board to colour coordinates
     img_points, img_points_h = transform_from_X_to_Y(T_bc, board_points_h)
 
-    for idx in range(img_points.shape[0]):
-        cv2.circle(rgb_img, tuple(img_points[idx, :].astype(int)),
-                   radius=5, color=(255, 255, 0), thickness=-1)
-
     # Display pose of board with respect to RGB camera
-    cv2.drawFrameAxes(debug_img, cameraMatrix=rgb_intrinsic, distCoeffs=rgb_distort,
+    [cv2.circle(rgb_img, tuple(img_points[idx, :].astype(int)), radius=5,
+                color=(255, 255, 0), thickness=-1) for idx in range(img_points.shape[0])]
+    cv2.drawFrameAxes(overlay_img, cameraMatrix=rgb_intrinsic, distCoeffs=rgb_distort,
                       rvec=rvecs, tvec=tvecs, length=0.03, thickness=5)
     cv2.namedWindow("Board pose", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("Board pose", 960, 540)
-    cv2.imshow("Board pose", debug_img)
+    cv2.imshow("Board pose", overlay_img)
     cv2.waitKey(0)
+    # -------------
 
     # 4. BOARD TO DEPTH SPACE
 
@@ -375,20 +449,21 @@ if __name__ == "__main__":
     corner_depth, corner_depth_homogenous = transform_from_X_to_Y(T_bd, board_points_h)
 
     # Colour to depth coordinates
-    img_points_h_3d = np.vstack((img_points_h, np.ones(shape=(1, board_points_h.shape[0]))))
+    img_points_h_3d = homogeneous_coordinates(img_points_h, 'row')
     colour_depth, colour_depth_homogenous = transform_from_X_to_Y(T_cd, img_points_h_3d)
 
     # Depth to board coordinates
-    corner_depth_board = (np.linalg.inv(T_bd) @ corner_depth_homogenous).T[:, :-1]
-    colour_depth_board = (np.linalg.inv(T_bd) @ colour_depth_homogenous).T[:, :-1]
+    corner_depth_board, _ = transform_from_X_to_Y(np.linalg.inv(T_bd), corner_depth_homogenous)
+    colour_depth_board, _ = transform_from_X_to_Y(np.linalg.inv(T_bd), colour_depth_homogenous)
+    # ------------
 
     # 5. TRANSFORM DEPTH DATA TO SHARED COORDINATE SYSTEM (BOARD COORDINATE SPACE)
 
     # Convert point cloud from HoloLens coordinate system to depth coordinates
-    pcd = o3d.io.read_point_cloud('data/point_clouds/binary/'
-                                  'depth_point-cloud_{}.ply'.format(im_time))
+    pcd = o3d.io.read_point_cloud('data/point_clouds/binary/depth_point-cloud_{}.ply'
+                                  .format('2023-07-25_14-31-29'))
     world_pcd = np.asarray(pcd.points)
-    world_pcd_h = homogeneous_coordinates(world_pcd)
+    world_pcd_h = homogeneous_coordinates(world_pcd, 'column').T
     world_to_depth, world_to_depth_h = transform_from_X_to_Y(T_hd, world_pcd_h)
     depth_est = world_to_depth[:, -1]
 
@@ -399,10 +474,10 @@ if __name__ == "__main__":
     U, V = np.meshgrid(np.array([list(range(1, depth_map.shape[1] + 1))]),
                        np.array([list(range(depth_map.shape[0], 0, -1))]))
     depth_img = np.array([U.reshape(-1, 1), V.reshape(-1, 1), depth_map.reshape(-1, 1)]).T.reshape(-1, 3)
-    depth_img_h = homogeneous_coordinates(depth_img)
+    depth_img_h = homogeneous_coordinates(depth_img, 'column').T
     depth_to_board, depth_to_board_h = transform_from_X_to_Y(np.linalg.inv(T_bd), depth_img_h)
 
-    # Normalise colourbar
+    # Normalise colorbar
     color = 'magma'
     normalizer = mpl.colors.Normalize(vmin=depth_map.min(), vmax=depth_map.max())
     mapper = mpl.cm.ScalarMappable(norm=normalizer, cmap=color)
@@ -437,6 +512,7 @@ if __name__ == "__main__":
     # ax_d.set_title('Depth data')
     #
     # plt.show()
+    # ---------
 
     # 6. COMPUTE EULER ANGLE FROM T_BD
     t1, t2, t3 = rotation_angles(np.linalg.inv(T_bd)[:-1, :-1], 'xyz')
