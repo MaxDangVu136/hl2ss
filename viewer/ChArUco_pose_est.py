@@ -27,14 +27,14 @@ def load_hololens_matrices_at_time(time):
         4x4 extrinsic matrix that transforms points from the HoloLens reference coordinate frame
         to the RGB camera frame.
     pv_pose: array
-        Search up definition!!
+        4x4 matrix defining the pose of the RGB camera with respect to the HoloLens coordinate system.
     depth_intrinsic: array
         4x4 calibration matrix of the depth camera.
     depth_extrinsic: array
         4x4 extrinsic matrix that transforms points from the HoloLens reference coordinate frame
         to the depth camera frame.
     depth_pose: array
-        Search up definition!!
+        4x4 matrix defining the pose of the depth camera with respect to the HoloLens coordinate system.
     """
 
     pv_intrinsic = pd.read_csv('data/matrices/intrinsics_{}.csv'.format(time),
@@ -67,7 +67,6 @@ def get_depth_map(time):
     ------
     depth_map: array
         Estimated depth of a point at a given pixel in the depth camera frame.
-
     """
 
     path = 'data/points/depth_{}.csv'.format(time)
@@ -84,7 +83,8 @@ def generate_charuco_board(specs):
     Parameters
     ---------
     specs: dictionary
-        "Come back to this"
+        Contains the specifications to create a ChArUco board of m squares by n squares.
+
     Returns
     -------
     board: aruco_CharucoBoard
@@ -94,7 +94,6 @@ def generate_charuco_board(specs):
         ArUco parameters to enable ArUco marker detection.
     aruco_dict: dictionary
         Dictionary for a set of unique ArUco markers of the same size.
-
     """
 
     aruco_param = cv2.aruco.DetectorParameters_create()
@@ -176,7 +175,6 @@ def CharucoBoard_to_HoloLensRGB(rvec, tvec, pv_intrinsic):
     ------
     t_bc: array
         4x4 transformation matrix from board coordinates to RGB camera space.
-
     """
 
     rotation_mat, _ = cv2.Rodrigues(rvec)
@@ -227,7 +225,6 @@ def rigid_base_corners_on_board(board_spec, cube_size):
     ------
     homogeneous_coordinates(board_points)
         4 x n array of rigid base coordinates in board space, where the last column is only 1's.
-
     """
 
     centre_pt = np.array([board_spec['squares_x'] * board_spec['square_length'],
