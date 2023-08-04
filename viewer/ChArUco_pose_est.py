@@ -50,8 +50,12 @@ def load_hololens_matrices_at_time(time):
                                sep=',', header=None).values.T
     lt_pose = pd.read_csv('data/matrices/lt_pose_{}.csv'.format(time),
                           sep=',', header=None).values.T
+    lt_to_world = pd.read_csv('data/matrices/lt_to_world_{}.csv'.format(time),
+                              sep=',', header=None).values.T
+    world_to_pv = pd.read_csv('data/matrices/world_to_pv_{}.csv'.format(time),
+                              sep=',', header=None).values.T
 
-    return pv_intrinsic, pv_distort, pv_extrinsic, pv_pose, lt_intrinsic, lt_extrinsic, lt_pose
+    return pv_intrinsic, pv_distort, pv_extrinsic, lt_intrinsic, lt_extrinsic, lt_to_world, world_to_pv
 
 
 def get_depth_map(time):
@@ -165,7 +169,8 @@ def CharucoBoard_to_HoloLensRGB(rvec, tvec, pv_intrinsic):
     Parameters
     ----------
     rvec: array
-        1x3 rotation vector showing rotation of object about the X, Y, Z axes with respect to the RGB camera.
+        1x3 rotation vector showing rotation of object in Euler angles about the X, Y, Z axes with respect to the
+        RGB camera.
     tvec: array
         1x3 translation vector from centre of RGB camera to object.
     pv_intrinsic: array
@@ -177,8 +182,14 @@ def CharucoBoard_to_HoloLensRGB(rvec, tvec, pv_intrinsic):
         4x4 transformation matrix from board coordinates to RGB camera space.
     """
 
+    # Compute 3x3 rotation matrix from the Euler angles vector
     rotation_mat, _ = cv2.Rodrigues(rvec)
+
+    # Concatenate the translation vector with rotation matrix to compute the pose matrix
     pose_bc = np.hstack((rotation_mat, tvec))
+
+    # Project the RGB camera calibration properties onto the pose matrix to obtain the
+    # transformation from board to RGB spaces.
     t_bc = pv_intrinsic @ pose_bc
 
     return t_bc
@@ -209,7 +220,7 @@ def homogeneous_coordinates(points, stack):
         return np.vstack((points, np.ones(shape=(1, points.shape[1]))))
 
 
-def rigid_base_corners_on_board(board_spec, cube_size):
+def rigid_base_corners_on_board(board_spec, cube_size, z):
     """
     This function computes the position of the rigid base corners of the cantilever beam in board coordinates.
 
@@ -221,18 +232,24 @@ def rigid_base_corners_on_board(board_spec, cube_size):
     cube_size: float
         Dimensions of the square cross-section of the cantilever beam attached to the rigid base.
 
+    z: float
+        Distance of rigid base corner from the surface viewed of the ChArUco board.
+
     Return
     ------
     homogeneous_coordinates(board_points)
         4 x n array of rigid base coordinates in board space, where the last column is only 1's.
     """
 
+    # Compute the centre point of the board, which is aligned with centre point of cantilever beam's fixed surface
     centre_pt = np.array([board_spec['squares_x'] * board_spec['square_length'],
                           board_spec['squares_y'] * board_spec['square_length']]) / 2
-    board_points = np.array([[centre_pt[0] - cube_size / 2, centre_pt[1] - cube_size / 2, -0.003],
-                             [centre_pt[0] - cube_size / 2, centre_pt[1] + cube_size / 2, -0.003],
-                             [centre_pt[0] + cube_size / 2, centre_pt[1] + cube_size / 2, -0.003],
-                             [centre_pt[0] + cube_size / 2, centre_pt[1] - cube_size / 2, -0.003]])
+
+    # Obtain the position of the four corners of the cantilever beam's rigid base.
+    board_points = np.array([[centre_pt[0] - cube_size / 2, centre_pt[1] - cube_size / 2, z],
+                             [centre_pt[0] - cube_size / 2, centre_pt[1] + cube_size / 2, z],
+                             [centre_pt[0] + cube_size / 2, centre_pt[1] + cube_size / 2, z],
+                             [centre_pt[0] + cube_size / 2, centre_pt[1] - cube_size / 2, z]])
 
     return homogeneous_coordinates(board_points, 'column').T
 
@@ -343,19 +360,21 @@ def rotation_angles(matrix, order):
 
 # ChArUco board specs (m squares x n squares)
 Board16x12 = {
-    'squares_x': 16,
-    'squares_y': 12,
-    'square_length': 0.016,  # in m
-    'marker_length': 0.012,  # in m
-    'num_px_height': 600,
-    'num_px_width': 600,
-    'aruco_dict': cv2.aruco.DICT_6X6_100
+    'squares_x': 16,  # number of squares (n) in the x direction (rows)
+    'squares_y': 12,  # number of squares (m) in the y direction (columns)
+    'square_length': 0.016,  # length of chessboard squares in m
+    'marker_length': 0.012,  # length of ArUco marker in m
+    'num_px_height': 600,  # number of pixels in the x direction
+    'num_px_width': 600,  # number of pixels in the y direction
+    'aruco_dict': cv2.aruco.DICT_6X6_100  # ArUco dictionary with 100 different unique marjers, each marker in
+    # dictionary has a distinct pattern. This pattern is defined by a
+    # grid of 6x6 black and white cells
 }
 Board12x9 = {
     'squares_x': 12,
     'squares_y': 9,
-    'square_length': 0.022,  # in m
-    'marker_length': 0.017,  # in m
+    'square_length': 0.022,
+    'marker_length': 0.017,
     'num_px_height': 600,
     'num_px_width': 600,
     'aruco_dict': cv2.aruco.DICT_6X6_100
@@ -381,11 +400,13 @@ Board6x6 = {
 
 if __name__ == "__main__":
 
-    # 0. LOADING RELEVANT IMAGES
-    rgb_img = cv2.imread('data/rgb_images/20230725_143135_HoloLens.jpg')
-    rgb_intrinsic, rgb_distort, rgb_extrinsic, rgb_pose, depth_intrinsic, depth_extrinsic, depth_pose = \
-        load_hololens_matrices_at_time(time='2023-07-25_14-31-29')
-    depth_map = get_depth_map(time='2023-07-25_14-31-29')
+    # 0. LOADING RELEVANT IMAGES AND CAMERA MATRICES
+    imtime = '2023-07-25_14-31-29'  # time at which HoloLens Research Mode images were taken
+    rgb_img = cv2.imread(
+        'data/rgb_images/20230725_143135_HoloLens.jpg')  # RGB images are captured slightly after the research mode images
+    rgb_intrinsic, rgb_distort, rgb_extrinsic, depth_intrinsic, depth_extrinsic, T_dw, T_wc = \
+        load_hololens_matrices_at_time(time=imtime)
+    depth_map = get_depth_map(time=imtime)
     # ----------
 
     # 1. GENERATE CHARUCO BOARD AND THEIR OBJECT POINTS (IN BOARD COORDINATE SYSTEM)
@@ -417,7 +438,7 @@ if __name__ == "__main__":
 
     # Get corresponding image points of rigid base corners from measured positions in board coordinates.
     T_bc = CharucoBoard_to_HoloLensRGB(rvec=rvecs, tvec=tvecs, pv_intrinsic=rgb_intrinsic)
-    board_points_h = rigid_base_corners_on_board(board_spec=board_specs, cube_size=0.030)
+    board_points_h = rigid_base_corners_on_board(board_spec=board_specs, cube_size=0.030, z=0.0)
 
     # Board to colour coordinates
     img_points, img_points_h = transform_from_X_to_Y(T_bc, board_points_h)
@@ -454,75 +475,45 @@ if __name__ == "__main__":
     colour_depth_board, _ = transform_from_X_to_Y(np.linalg.inv(T_bd), colour_depth_homogenous)
     # ------------
 
-    # 5. TRANSFORM DEPTH DATA TO SHARED COORDINATE SYSTEM (BOARD COORDINATE SPACE)
+    # 5. TRANSFORM BOARD (B), RGB CAM (C), AND DEPTH CAM DATA ONTO REAL WORLD SPACE
 
     # Convert point cloud from HoloLens coordinate system to depth coordinates
     pcd = o3d.io.read_point_cloud('data/point_clouds/binary/depth_point-cloud_{}.ply'
-                                  .format('2023-07-25_14-31-29'))
+                                  .format(imtime))
     world_pcd = np.asarray(pcd.points)
     world_pcd_h = homogeneous_coordinates(world_pcd, 'column').T
     world_to_depth, world_to_depth_h = transform_from_X_to_Y(T_hd, world_pcd_h)
     depth_est = world_to_depth[:, -1]
 
-    # Depth to board coordinates
-    depth_to_board, depth_to_board_h = transform_from_X_to_Y(np.linalg.inv(T_bd), world_to_depth_h)
+    T_cw = np.linalg.inv(T_wc)
+    T_bw = T_cw @ T_bc
+    T_cd = np.linalg.inv(T_dw) @ T_cw
+    T_dc = np.linalg.inv(T_cd)
+    T_bd = T_cd @ T_bc
 
-    # Using depth map
-    U, V = np.meshgrid(np.array([list(range(1, depth_map.shape[1] + 1))]),
-                       np.array([list(range(depth_map.shape[0], 0, -1))]))
-    depth_img = np.array([U.reshape(-1, 1), V.reshape(-1, 1), depth_map.reshape(-1, 1)]).T.reshape(-1, 3)
-    depth_img_h = homogeneous_coordinates(depth_img, 'column').T
-    depth_to_board, depth_to_board_h = transform_from_X_to_Y(np.linalg.inv(T_bd), depth_img_h)
+    world = pd.read_csv('data/points/world_{}.csv'.format(imtime), sep=',', header=None).values
+    b_in_w, _ = transform_from_X_to_Y(T_bw, board_points_h)
+    b_in_c, b_in_c_h = transform_from_X_to_Y(T_bc, board_points_h)
+    c_in_w, c_in_w_h = transform_from_X_to_Y(T_cw, b_in_c_h)
+    c_in_d, c_in_d_h = transform_from_X_to_Y(T_cd, b_in_c_h)
+    d_in_w, _ = transform_from_X_to_Y(T_dw, c_in_d_h)
+    b_in_d, _ = transform_from_X_to_Y(T_bd, board_points_h)
 
-    # Normalise colorbar
-    color = 'magma'
-    normalizer = mpl.colors.Normalize(vmin=depth_map.min(), vmax=depth_map.max())
-    mapper = mpl.cm.ScalarMappable(norm=normalizer, cmap=color)
+    # 6. VISUALISE RIGID PLATE CORNERS WITH POINT CLOUD
+    test = o3d.geometry.PointCloud()
+    test.points = o3d.utility.Vector3dVector(b_in_d)
+    o3d.io.write_point_cloud("data/point_clouds/binary/backplate_corners_depth.ply", test)
 
-    # Compare depth to board transformed data vs original depth data
-    fig = plt.figure()
+    # 7. UNDEFORMED CANTILEVER GEOMETRY
+    model_nodes = pd.read_csv('data/undeformed_cantilever/model_nodes.csv',
+                              sep=',', header=None).values
+    model_corner_nodes = pd.read_csv('data/undeformed_cantilever/model_fixed_end_corners.csv',
+                                     sep=',', header=None).values
+    transformed_model_nodes = pd.read_csv('data/undeformed_cantilever/transformed_model_nodes.csv',
+                                          sep=',', header=None).values
+    transformed_model_corner_nodes = pd.read_csv('data/undeformed_cantilever/transformed_model_fixed_end_corners.csv',
+                                                 sep=',', header=None).values
+    centred_model_nodes = pd.read_csv('data/undeformed_cantilever/centred_transformed_model_nodes.csv',
+                                      sep=',', header=None).values
 
-    plt.contourf(U, V, depth_map, cmap=color, origin='upper')
-    plt.xlabel('u')
-    plt.ylabel('v')
-    plt.colorbar(mapper)
-    plt.show()
-
-    # ax_db = fig.add_subplot(1, 2, 1, projection='3d')
-    # scatter_db = ax_db.scatter(depth_map_to_board[:, 0], depth_map_to_board[:, 1],
-    #                            depth_map_to_board[:, 2], c=depth_map_to_board[:, 2], cmap='magma')
-    # cbar_db = fig.colorbar(scatter_db, ax=ax_db)
-    # cbar_db.set_label('depth estimate')
-    # ax_db.set_xlabel('x')
-    # ax_db.set_ylabel('y')
-    # ax_db.set_zlabel('z')
-    # ax_db.set_title('Depth map to board transformation')
-    #
-    # ax_d = fig.add_subplot(1, 2, 2, projection='3d')
-    # scatter_d = ax_d.scatter(world_pcd[:, 0], world_pcd[:, 1],
-    #                          world_pcd[:, 2], c=world_pcd[:, 2], cmap='magma')
-    # cbar_d = fig.colorbar(scatter_d, ax=ax_d)
-    # cbar_d.set_label('depth estimate')
-    # ax_d.set_xlabel('x')
-    # ax_d.set_ylabel('y')
-    # ax_d.set_zlabel('z')
-    # ax_d.set_title('Depth data')
-    #
-    # plt.show()
-    # ---------
-
-    # 6. COMPUTE EULER ANGLE FROM T_BD
-    t1, t2, t3 = rotation_angles(np.linalg.inv(T_bd)[:-1, :-1], 'xyz')
-    print(t1, t2, t3)
-    t1, t2, t3 = rotation_angles(np.linalg.inv(T_bd)[:-1, :-1], 'yxz')
-    print(t1, t2, t3)
-
-    t1, t2, t3 = rotation_angles(np.linalg.inv(T_bd)[:-1, :-1], 'xzy')
-    print(t1, t2, t3)
-    t1, t2, t3 = rotation_angles(np.linalg.inv(T_bd)[:-1, :-1], 'zxy')
-    print(t1, t2, t3)
-
-    t1, t2, t3 = rotation_angles(np.linalg.inv(T_bd)[:-1, :-1], 'yzx')
-    print(t1, t2, t3)
-    t1, t2, t3 = rotation_angles(np.linalg.inv(T_bd)[:-1, :-1], 'zyx')
-    print(t1, t2, t3)
+    print("Script done")
