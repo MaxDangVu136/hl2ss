@@ -358,6 +358,95 @@ def rotation_angles(matrix, order):
     return theta1, theta2, theta3
 
 
+def matrix_minus_vector(M, v):
+    new_M = np.zeros(np.shape(M))
+    for i in range(len(M)):
+        new_M[i] = M[i]-v[i]
+    return new_M
+
+
+def centroid(M):
+    centroid = np.zeros(len(M))
+    for i in range(len(M)):
+        centroid[i] = np.mean(M[i])
+    return centroid
+
+
+def find_transformation(experimental_corners, model_corners):
+    """
+    Finds the transformation (rotation and translation) between the experimental and model back corner points
+    :param experimental_corners: orientation data from experimental points
+    :param model_corners: orientation data from model
+    :return: R = rotation matrix, translation = translation vector
+    """
+    #Finds the rotation and translation that transforms model_corners into experimental corners
+
+    # Organise points into [x1,x2,x3; y1,y2,y3; z1,z2,z3] format
+    model_corners = model_corners.transpose()
+    experimental_corners = experimental_corners.transpose()
+
+    # Find centroids of points
+    model_centroid = centroid(model_corners)
+    experimental_centroid = centroid(experimental_corners)
+    # Remove translation
+    model_centered = matrix_minus_vector(model_corners, model_centroid)
+    experimental_centered = matrix_minus_vector(experimental_corners, experimental_centroid)
+
+    # Calculate rotation matrix using Horns quarterion with horns least square from Horn, 1986
+    # source: https://pdfs.semanticscholar.org/3120/a0e44d325c477397afcf94ea7f285a29684a.pdf
+    M = np.matmul(model_centered, experimental_centered.transpose())
+
+    [Sxx, Sxy, Sxz] = M[0]
+    [Syx, Syy, Syz] = M[1]
+    [Szx, Szy, Szz] = M[2]
+
+    # Create N matrix
+    N = np.vstack(([(Sxx + Syy + Szz), (Syz - Szy), (Szx - Sxz), (Sxy - Syx)],
+                   [(Syz - Szy), (Sxx - Syy - Szz), (Sxy + Syx), (Szx + Sxz)],
+                   [(Szx - Sxz), (Sxy + Syx), (-Sxx + Syy - Szz), (Syz + Szy)],
+                   [(Sxy - Syx), (Szx + Sxz), (Syz + Szy), (-Sxx - Syy + Szz)]))
+
+    # Find the maximum eigenvector which is the rotation quarterion
+    [evalues, evectors] = np.linalg.eig(N)
+    emax = np.max(np.abs(evalues))
+    i_emax = np.unravel_index(np.argmax(np.real(evalues)), evalues.shape)  # index of largest eigenvector
+    q = np.real(evectors[:, i_emax[0]])
+    sign = np.sign(np.max(np.abs(q)))  # sign ambiguity
+    q = q * sign
+
+    # Find orthogonal rotation matrix
+    unit_q = q / np.linalg.norm(q)  # unit quarterion
+    [q0, qx, qy, qz] = unit_q
+    v = np.array((qx, qy, qz))
+    Z = np.vstack(([q0, -qz, qy],
+                   [qz, q0, -qx],
+                   [-qy, qx, q0]))
+
+    R = np.matmul(v.reshape(3, 1), v.reshape(1, 3)) + np.matmul(Z, Z)  # reshape vector for matrix multiplication
+
+    # Find translation from centroids
+    translation = experimental_centroid - np.matmul(R, model_centroid)
+
+    return R, translation
+
+
+def align_model(R, translation, model_points):
+    """
+    Aligns the original model points to the experimental data
+    :param R: rotation matrix between model and experimental data
+    :param translation: translation vector
+    :param model_points: original model points in coordinate format
+    :return: transformed points in coordinate format
+    """
+    # model points transposed to use matmul transformation
+    model_points = model_points.transpose()
+
+    rotated_points = np.matmul(R, model_points)
+    transformed_points = matrix_minus_vector(rotated_points, -translation)
+
+    return transformed_points.transpose() #transformed points transposed to return to coordinate format
+
+
 # ChArUco board specs (m squares x n squares)
 Board16x12 = {
     'squares_x': 16,  # number of squares (n) in the x direction (rows)
@@ -516,4 +605,7 @@ if __name__ == "__main__":
     centred_model_nodes = pd.read_csv('data/undeformed_cantilever/centred_transformed_model_nodes.csv',
                                       sep=',', header=None).values
 
-    print("Script done")
+
+    R, t = find_transformation(b_in_d, model_corner_nodes)
+    print(R)
+    print(t)
