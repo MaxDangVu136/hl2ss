@@ -195,7 +195,7 @@ def CharucoBoard_to_HoloLensRGB(rvec, tvec, pv_intrinsic):
     return t_bc
 
 
-def homogeneous_coordinates(points, stack):
+def homogeneous_vectors(points, stack):
     """
     This function adds n columns of 1's to a 2D array to perform transformation from space X to space Y.
 
@@ -237,7 +237,7 @@ def rigid_base_corners_on_board(board_spec, cube_size, z):
 
     Return
     ------
-    homogeneous_coordinates(board_points)
+    homogeneous_vectors(board_points)
         4 x n array of rigid base coordinates in board space, where the last column is only 1's.
     """
 
@@ -251,7 +251,7 @@ def rigid_base_corners_on_board(board_spec, cube_size, z):
                              [centre_pt[0] + cube_size / 2, centre_pt[1] + cube_size / 2, z],
                              [centre_pt[0] + cube_size / 2, centre_pt[1] - cube_size / 2, z]])
 
-    return homogeneous_coordinates(board_points, 'column').T
+    return homogeneous_vectors(board_points, 'column').T
 
 
 def transform_from_X_to_Y(t_mtx, x_h):
@@ -358,28 +358,39 @@ def rotation_angles(matrix, order):
     return theta1, theta2, theta3
 
 
-def matrix_minus_vector(M, v):
-    new_M = np.zeros(np.shape(M))
-    for i in range(len(M)):
-        new_M[i] = M[i]-v[i]
-    return new_M
+def matrix_minus_vector(matrix, vector):
+    new_matrix = np.zeros(np.shape(matrix))
+    for i in range(len(matrix)):
+        new_matrix[i] = matrix[i] - vector[i]
+    return new_matrix
 
 
-def centroid(M):
-    centroid = np.zeros(len(M))
-    for i in range(len(M)):
-        centroid[i] = np.mean(M[i])
+def centroid(matrix):
+    centroid = np.zeros(len(matrix))
+    for i in range(len(matrix)):
+        centroid[i] = np.mean(matrix[i])
     return centroid
 
 
 def find_transformation(experimental_corners, model_corners):
     """
-    Finds the transformation (rotation and translation) between the experimental and model back corner points
-    :param experimental_corners: orientation data from experimental points
-    :param model_corners: orientation data from model
-    :return: R = rotation matrix, translation = translation vector
+    Finds the transformation (rotation and translation) between the experimental and model back corner points,
+    specifically transforming model_corners into experimental corners.
+
+    Parameters
+    ----------
+    experimental_corners: array
+        orientation data from experimental points
+    model_corners: array
+        orientation data from model
+
+    Returns
+    -------
+    R: array
+        rotation matrix
+    t: array
+        translation vector
     """
-    #Finds the rotation and translation that transforms model_corners into experimental corners
 
     # Organise points into [x1,x2,x3; y1,y2,y3; z1,z2,z3] format
     model_corners = model_corners.transpose()
@@ -388,6 +399,7 @@ def find_transformation(experimental_corners, model_corners):
     # Find centroids of points
     model_centroid = centroid(model_corners)
     experimental_centroid = centroid(experimental_corners)
+
     # Remove translation
     model_centered = matrix_minus_vector(model_corners, model_centroid)
     experimental_centered = matrix_minus_vector(experimental_corners, experimental_centroid)
@@ -425,16 +437,16 @@ def find_transformation(experimental_corners, model_corners):
     R = np.matmul(v.reshape(3, 1), v.reshape(1, 3)) + np.matmul(Z, Z)  # reshape vector for matrix multiplication
 
     # Find translation from centroids
-    translation = experimental_centroid - np.matmul(R, model_centroid)
+    t = experimental_centroid - np.matmul(R, model_centroid)
 
-    return R, translation
+    return R, t
 
 
-def align_model(R, translation, model_points):
+def align_model(R, t, model_points):
     """
     Aligns the original model points to the experimental data
     :param R: rotation matrix between model and experimental data
-    :param translation: translation vector
+    :param t: translation vector
     :param model_points: original model points in coordinate format
     :return: transformed points in coordinate format
     """
@@ -442,9 +454,10 @@ def align_model(R, translation, model_points):
     model_points = model_points.transpose()
 
     rotated_points = np.matmul(R, model_points)
-    transformed_points = matrix_minus_vector(rotated_points, -translation)
+    transformed_points = matrix_minus_vector(rotated_points, -t)
 
-    return transformed_points.transpose() #transformed points transposed to return to coordinate format
+    # transformed points transposed to return to coordinate format
+    return transformed_points.transpose()
 
 
 # ChArUco board specs (m squares x n squares)
@@ -556,7 +569,7 @@ if __name__ == "__main__":
     corner_depth, corner_depth_homogenous = transform_from_X_to_Y(T_bd, board_points_h)
 
     # Colour to depth coordinates
-    img_points_h_3d = homogeneous_coordinates(img_points_h, 'row')
+    img_points_h_3d = homogeneous_vectors(img_points_h, 'row')
     colour_depth, colour_depth_homogenous = transform_from_X_to_Y(T_cd, img_points_h_3d)
 
     # Depth to board coordinates
@@ -570,7 +583,7 @@ if __name__ == "__main__":
     pcd = o3d.io.read_point_cloud('data/point_clouds/binary/depth_point-cloud_{}.ply'
                                   .format(imtime))
     world_pcd = np.asarray(pcd.points)
-    world_pcd_h = homogeneous_coordinates(world_pcd, 'column').T
+    world_pcd_h = homogeneous_vectors(world_pcd, 'column').T
     world_to_depth, world_to_depth_h = transform_from_X_to_Y(T_hd, world_pcd_h)
     depth_est = world_to_depth[:, -1]
 
@@ -589,11 +602,13 @@ if __name__ == "__main__":
     b_in_d, _ = transform_from_X_to_Y(T_bd, board_points_h)
 
     # 6. VISUALISE RIGID PLATE CORNERS WITH POINT CLOUD
-    test = o3d.geometry.PointCloud()
-    test.points = o3d.utility.Vector3dVector(b_in_d)
-    o3d.io.write_point_cloud("data/point_clouds/binary/backplate_corners_depth.ply", test)
+    pc = o3d.geometry.PointCloud()
+    pc.points = o3d.utility.Vector3dVector(b_in_d)
+    o3d.io.write_point_cloud("data/point_clouds/binary/backplate_corners_depth.ply", pc)
 
     # 7. UNDEFORMED CANTILEVER GEOMETRY
+
+    # Load in all model information
     model_nodes = pd.read_csv('data/undeformed_cantilever/model_nodes.csv',
                               sep=',', header=None).values
     model_corner_nodes = pd.read_csv('data/undeformed_cantilever/model_fixed_end_corners.csv',
@@ -605,7 +620,28 @@ if __name__ == "__main__":
     centred_model_nodes = pd.read_csv('data/undeformed_cantilever/centred_transformed_model_nodes.csv',
                                       sep=',', header=None).values
 
+    # a. Toy example: model fixed end corners
+    # Process model fixed end corners for subsequent transformation
+    model_corner_nodes = np.array([model_corner_nodes[1], model_corner_nodes[0],
+                                  model_corner_nodes[2], model_corner_nodes[3]])/1000
+    model_corner_nodes = np.array([model_corner_nodes[:, 1], model_corner_nodes[:, 2],
+                                   model_corner_nodes[:, 0]]).T
+    board_points = board_points_h[:-1, :].T
 
-    R, t = find_transformation(b_in_d, model_corner_nodes)
-    print(R)
-    print(t)
+    # Compute transformation between board and model spaces
+    rotation, translation = find_transformation(board_points, model_corner_nodes)
+    T_mb = np.vstack((np.hstack((rotation, translation.reshape(-1, 1))), [0., 0., 0., 1.]))
+
+    # Infer transformation between model and depth spaces
+    T_md = T_bd @ T_mb
+    m_to_d, _ = transform_from_X_to_Y(T_md, homogeneous_vectors(model_corner_nodes, 'column').T)
+
+    # Save model fixed end in depth space as point cloud.
+    md = o3d.geometry.PointCloud()
+    md.points = o3d.utility.Vector3dVector(m_to_d)
+    o3d.io.write_point_cloud("data/point_clouds/binary/backplate_corners_from_model.ply", md)
+
+    # b. Apply to all model nodes in undeformed geometry
+
+
+    # c. Apply to all model nodes in deformed geometry
