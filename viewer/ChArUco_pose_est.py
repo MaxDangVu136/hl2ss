@@ -366,6 +366,7 @@ def find_transformation(experimental_corners, model_corners):
 def align_model(R, t, model_points):
     """
     Aligns the original model points to the experimental data
+    (NOTE: it performs the same functionality as transform_from_X_to_Y().)
     :param R: rotation matrix between model and experimental data
     :param t: translation vector
     :param model_points: original model points in coordinate format
@@ -460,11 +461,16 @@ Board6x6 = {
 if __name__ == "__main__":
 
     # 0. LOADING RELEVANT IMAGES AND CAMERA MATRICES
-    imtime = '2023-07-25_14-31-29'  # time at which HoloLens Research Mode images were taken
-    rgb_img = cv2.imread(
-        'data/rgb_images/20230725_143135_HoloLens.jpg')  # RGB images are captured slightly after the research mode images
+
+    # time at which HoloLens Research Mode images were taken
+    imtime = '2023-07-25_14-31-29'
+
+    # RGB images are captured slightly after the research mode images
+    rgb_img = cv2.imread('data/rgb_images/20230725_143135_HoloLens.jpg')
+
     rgb_intrinsic, rgb_distort, rgb_extrinsic, depth_intrinsic, depth_extrinsic, T_dw, T_wc = \
         load_hololens_matrices_at_time(time=imtime)
+
     depth_map = get_depth_map(time=imtime)
     # ----------
 
@@ -538,6 +544,8 @@ if __name__ == "__main__":
     # 5. TRANSFORM BOARD (B), RGB CAM (C), AND DEPTH CAM DATA ONTO REAL WORLD SPACE
 
     # Convert point cloud from HoloLens coordinate system to depth coordinates
+
+    # Point cloud 1: depth point cloud acquired from HoloLens 2
     pcd = o3d.io.read_point_cloud(
         'data/point_clouds/binary/depth_point-cloud_{}.ply'.format(imtime))
     world_pcd = np.asarray(pcd.points)
@@ -545,25 +553,26 @@ if __name__ == "__main__":
     world_to_depth, world_to_depth_h = transform_from_X_to_Y(T_hd, world_pcd_h)
     depth_est = world_to_depth[:, -1]
 
+    # Collect all transformations after considering world coordinates
     T_cw = np.linalg.inv(T_wc)
     T_bw = T_cw @ T_bc
     T_cd = np.linalg.inv(T_dw) @ T_cw
     T_dc = np.linalg.inv(T_cd)
     T_bd = T_cd @ T_bc
 
-    world = pd.read_csv('data/points/world_{}.csv'.format(imtime),
-                        sep=',', header=None).values
-    b_in_w, _ = transform_from_X_to_Y(T_bw, board_points_h)
-    b_in_c, b_in_c_h = transform_from_X_to_Y(T_bc, board_points_h)
-    c_in_w, c_in_w_h = transform_from_X_to_Y(T_cw, b_in_c_h)
-    c_in_d, c_in_d_h = transform_from_X_to_Y(T_cd, b_in_c_h)
-    d_in_w, _ = transform_from_X_to_Y(T_dw, c_in_d_h)
+    # b_in_w, _ = transform_from_X_to_Y(T_bw, board_points_h)
+    # b_in_c, b_in_c_h = transform_from_X_to_Y(T_bc, board_points_h)
+    # c_in_w, c_in_w_h = transform_from_X_to_Y(T_cw, b_in_c_h)
+    # c_in_d, c_in_d_h = transform_from_X_to_Y(T_cd, b_in_c_h)
+    # d_in_w, _ = transform_from_X_to_Y(T_dw, c_in_d_h)
+
+    # Align rigid base corners in board space to corresponding positions in depth space.
     b_in_d, _ = transform_from_X_to_Y(T_bd, board_points_h)
 
-    # 6. VISUALISE RIGID PLATE CORNERS WITH POINT CLOUD
+    # 6. VISUALISE RIGID PLATE CORNERS WITH POINT CLOUD (Point cloud 2: backplate corners on board in depth space)
     create_point_cloud("data/point_clouds/binary/backplate_corners_depth.ply", b_in_d)
 
-    # 7. UNDEFORMED CANTILEVER GEOMETRY
+    # 7. CANTILEVER GEOMETRY
 
     # Load in all model information
     model_nodes = pd.read_csv(
@@ -593,7 +602,7 @@ if __name__ == "__main__":
     m_to_d, _ = transform_from_X_to_Y(
         T_md, homogeneous_vectors(model_corner_nodes, 'column').T)
 
-    # Save model fixed end in depth space as point cloud.
+    # Point cloud 3: model fixed end in depth space.
     create_point_cloud("data/point_clouds/binary/backplate_corners_from_model.ply",
                        m_to_d)
 
@@ -601,12 +610,25 @@ if __name__ == "__main__":
     undeformed_model_nodes = reorder_model_node_coordinates(model_nodes, False)
     undeformed_model_in_depth, _ = transform_from_X_to_Y(
         T_md, homogeneous_vectors(undeformed_model_nodes, 'column').T)
+
+    # Point cloud 4: undeformed model in depth space
     create_point_cloud("data/point_clouds/binary/model_points_in_depth.ply",
                        undeformed_model_in_depth)
 
     # c. Apply to all model nodes in deformed geometry
     deformed_model_nodes = reorder_model_node_coordinates(deformed_model, False)
+    # create_point_cloud("data/point_clouds/binary/TEST_deformed_model_nodes.ply",
+    #                    deformed_model_nodes)
+
+    # Transformation matrix obtained by aligning the rigid base corners of the deformed geometry
+    # to the undeformed geometry (in depth space) using MeshLab's align tool.
+    T_deformed_undeformed = np.array([[0., 0.33, -0.94, -0.02],
+                                      [-0.97, -0.22, -0.08, -0.18],
+                                      [-0.24, 0.92, 0.32, 0.52],
+                                      [0., 0., 0., 1.]])
     deformed_model_in_depth, _ = transform_from_X_to_Y(
-        T_md, homogeneous_vectors(deformed_model_nodes, 'column').T)
+        T_deformed_undeformed, homogeneous_vectors(deformed_model_nodes, 'column').T)
+
+    # Point cloud 5: deformed model geometry in depth space
     create_point_cloud("data/point_clouds/binary/deformed_model_in_depth.ply",
                        deformed_model_in_depth)
