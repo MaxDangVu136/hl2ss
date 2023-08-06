@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import cv2  # OpenCV version was 4.4
 import open3d as o3d
@@ -42,14 +41,14 @@ def load_hololens_matrices_at_time(time):
     pv_distort = np.array([0., 0., 0., 0., 0.])
     pv_extrinsic = pd.read_csv('data/matrices/extrinsics_{}.csv'.format(time),
                                sep=',', header=None).values.T
-    pv_pose = pd.read_csv('data/matrices/pv_pose_{}.csv'.format(time),
-                          sep=',', header=None).values.T
+    # pv_pose = pd.read_csv('data/matrices/pv_pose_{}.csv'.format(time),
+    #                       sep=',', header=None).values.T
     lt_intrinsic = pd.read_csv('data/matrices/LT_intrinsics_{}.csv'.format(time),
                                sep=',', header=None).values.T
     lt_extrinsic = pd.read_csv('data/matrices/LT_extrinsics_{}.csv'.format(time),
                                sep=',', header=None).values.T
-    lt_pose = pd.read_csv('data/matrices/lt_pose_{}.csv'.format(time),
-                          sep=',', header=None).values.T
+    # lt_pose = pd.read_csv('data/matrices/lt_pose_{}.csv'.format(time),
+    #                      sep=',', header=None).values.T
     lt_to_world = pd.read_csv('data/matrices/lt_to_world_{}.csv'.format(time),
                               sep=',', header=None).values.T
     world_to_pv = pd.read_csv('data/matrices/world_to_pv_{}.csv'.format(time),
@@ -280,16 +279,43 @@ def transform_from_X_to_Y(t_mtx, x_h):
 
 
 def matrix_minus_vector(matrix, vector):
-    new_matrix = np.zeros(np.shape(matrix))
-    for i in range(len(matrix)):
-        new_matrix[i] = matrix[i] - vector[i]
+    """
+    This function subtracts a vector from a 2D matrix.
+
+    Parameters
+    ----------
+    matrix: array
+        3 x n array containing coordinates of n nodes on an object
+    vector: array
+        3 x 1 array containing the centroid position of said object
+
+    Returns
+    -------
+    new_matrix: array
+        3 x n array of n centred points on an object
+    """
+
+    new_matrix = [matrix[idx] - vector[idx] for idx in range(len(matrix))]
     return new_matrix
 
 
-def centroid(matrix):
-    centroid = np.zeros(len(matrix))
-    for i in range(len(matrix)):
-        centroid[i] = np.mean(matrix[i])
+def find_centroid(matrix):
+    """
+    This function computes the centroid position of an object, given it's 3D nodal coordinates.
+
+    Parameters
+    ----------
+    matrix: array
+        3 x n array containing coordinates of n nodes on an object
+
+    Return
+    -----
+    centroid: array
+        3 x 1 array containing the centroid position of said object
+
+    """
+
+    centroid = [np.mean(matrix[idx]) for idx in range(len(matrix))]
     return centroid
 
 
@@ -308,9 +334,9 @@ def find_transformation(experimental_corners, model_corners):
     Returns
     -------
     R: array
-        rotation matrix
+       3 x 3 rotation matrix between model and experimental data
     t: array
-        translation vector
+       3 x 1 translation vector between the origins of model space and experimental data space
     """
 
     # Organise points into [x1,x2,x3; y1,y2,y3; z1,z2,z3] format
@@ -318,8 +344,8 @@ def find_transformation(experimental_corners, model_corners):
     experimental_corners = experimental_corners.transpose()
 
     # Find centroids of points
-    model_centroid = centroid(model_corners)
-    experimental_centroid = centroid(experimental_corners)
+    model_centroid = find_centroid(model_corners)
+    experimental_centroid = find_centroid(experimental_corners)
 
     # Remove translation
     model_centered = matrix_minus_vector(model_corners, model_centroid)
@@ -327,7 +353,7 @@ def find_transformation(experimental_corners, model_corners):
 
     # Calculate rotation matrix using Horns quarterion with horns least square from Horn, 1986
     # source: https://pdfs.semanticscholar.org/3120/a0e44d325c477397afcf94ea7f285a29684a.pdf
-    M = np.matmul(model_centered, experimental_centered.transpose())
+    M = model_centered @ experimental_centered.transpose()
 
     [Sxx, Sxy, Sxz] = M[0]
     [Syx, Syy, Syz] = M[1]
@@ -355,22 +381,32 @@ def find_transformation(experimental_corners, model_corners):
                    [qz, q0, -qx],
                    [-qy, qx, q0]))
 
-    R = np.matmul(v.reshape(3, 1), v.reshape(1, 3)) + np.matmul(Z, Z)  # reshape vector for matrix multiplication
+    R = v.reshape(3, 1) @ v.reshape(1, 3) + np.matmul(Z, Z)  # reshape vector for matrix multiplication
 
     # Find translation from centroids
-    t = experimental_centroid - np.matmul(R, model_centroid)
+    t = experimental_centroid - R @ model_centroid
 
     return R, t
 
 
 def align_model(R, t, model_points):
     """
-    Aligns the original model points to the experimental data
-    (NOTE: it performs the same functionality as transform_from_X_to_Y().)
-    :param R: rotation matrix between model and experimental data
-    :param t: translation vector
-    :param model_points: original model points in coordinate format
-    :return: transformed points in coordinate format
+    Aligns the original model points to the experimental data (NOTE: it performs the same functionality
+    as transform_from_X_to_Y).
+
+    Parameters
+    ---------
+    R: array
+        3 x 3 rotation matrix between model and experimental data
+    t: array
+        3 x 1 translation vector between the origins of model space and experimental data space
+    model_points: array
+        original model points in coordinate format
+
+    Return
+    ------
+    transformed_points.transpose(): array
+        transformed points in coordinate format
     """
     # model points transposed to use matmul transformation
     model_points = model_points.transpose()
@@ -384,21 +420,34 @@ def align_model(R, t, model_points):
 
 def reorder_model_node_coordinates(model_node_coordinates, corner):
     """
+    This function changes the order of the model node coordinates in the horizontal axis (i.e. columns) from [z, x, y]
+    to [x, y, z]. Note that x is the width of cross-section, y is the height of cross-section, and  z is the length
+    along beam.
 
-    :param model_node_coordinates:
-    :param corner:
-    :return:
+    Parameters
+    ---------
+    model_node_coordinates: array
+        n x 3 array for nodal coordinates of model in the order [z, x, y].
+
+    corner: boolean
+        specifies if model_node_coordinates are corner points or not.
+
+    Return
+    -----
+    reordered_model_nodes: array
+        n x 3 array for nodal coordinates of model in the order [x, y, z].
+
     """
 
-    if corner == True:
-        # Order node coordinates to go clockwise from top left coner of cross-section,
+    if corner is True:
+        # Order node coordinates to go clockwise from top left corner of cross-section,
         # and convert measurements from mm to m.
         reordered_model_nodes = np.array([model_node_coordinates[1], model_node_coordinates[0],
                                           model_node_coordinates[2], model_node_coordinates[3]]) / 1000
     else:
         reordered_model_nodes = model_node_coordinates / 1000
 
-    # Swap columns around (x: width of cross-section, y: height of cross-section, z: length along beam)
+    # Swap columns around to order [x, y, z]
     reordered_model_nodes = np.array([reordered_model_nodes[:, 1], reordered_model_nodes[:, 2],
                                       reordered_model_nodes[:, 0]]).T
 
@@ -407,10 +456,16 @@ def reorder_model_node_coordinates(model_node_coordinates, corner):
 
 def create_point_cloud(filepath, points):
     """
+    This function creates a 3D point cloud from a 2D array of points, and writes the point cloud
+    to a .ply file specified in the filepath.
 
-    :param filepath:
-    :param points:
-    :return:
+    Parameters
+    ---------
+    filepath: str
+        path to where the .ply point cloud file is saved.
+
+    points: array
+        k x 3 array of nodal coordinates of points in point cloud.
     """
 
     pc = o3d.geometry.PointCloud()
@@ -503,11 +558,11 @@ if __name__ == "__main__":
 
     # Get corresponding image points of rigid base corners from measured positions in board coordinates.
     T_bc = CharucoBoard_to_HoloLensRGB(rvec=rvecs, tvec=tvecs, pv_intrinsic=rgb_intrinsic)
-    board_points_h = rigid_base_corners_on_board(board_spec=board_specs, cube_size=0.030, z=0.0)
-    board_points = board_points_h[:-1, :].T
+    rigid_board_points_h = rigid_base_corners_on_board(board_spec=board_specs, cube_size=0.030, z=0.0)
+    rigid_board_points = rigid_board_points_h[:-1, :].T
 
     # Board to colour coordinates
-    img_points, img_points_h = transform_from_X_to_Y(T_bc, board_points_h)
+    img_points, img_points_h = transform_from_X_to_Y(T_bc, rigid_board_points_h)
 
     # Display pose of board with respect to RGB camera
     [cv2.circle(rgb_img, tuple(img_points[idx, :].astype(int)), radius=5,
@@ -530,7 +585,7 @@ if __name__ == "__main__":
     T_bd = T_hd @ np.linalg.inv(T_hc) @ T_bc
 
     # Board coordinates to depth coordinates
-    corner_depth, corner_depth_homogenous = transform_from_X_to_Y(T_bd, board_points_h)
+    corner_depth, corner_depth_homogenous = transform_from_X_to_Y(T_bd, rigid_board_points_h)
 
     # Colour to depth coordinates
     img_points_h_3d = homogeneous_vectors(img_points_h, 'row')
@@ -543,16 +598,6 @@ if __name__ == "__main__":
 
     # 5. TRANSFORM BOARD (B), RGB CAM (C), AND DEPTH CAM DATA ONTO REAL WORLD SPACE
 
-    # Convert point cloud from HoloLens coordinate system to depth coordinates
-
-    # Point cloud 1: depth point cloud acquired from HoloLens 2
-    pcd = o3d.io.read_point_cloud(
-        'data/point_clouds/binary/depth_point-cloud_{}.ply'.format(imtime))
-    world_pcd = np.asarray(pcd.points)
-    world_pcd_h = homogeneous_vectors(world_pcd, 'column').T
-    world_to_depth, world_to_depth_h = transform_from_X_to_Y(T_hd, world_pcd_h)
-    depth_est = world_to_depth[:, -1]
-
     # Collect all transformations after considering world coordinates
     T_cw = np.linalg.inv(T_wc)
     T_bw = T_cw @ T_bc
@@ -560,19 +605,13 @@ if __name__ == "__main__":
     T_dc = np.linalg.inv(T_cd)
     T_bd = T_cd @ T_bc
 
-    # b_in_w, _ = transform_from_X_to_Y(T_bw, board_points_h)
-    # b_in_c, b_in_c_h = transform_from_X_to_Y(T_bc, board_points_h)
-    # c_in_w, c_in_w_h = transform_from_X_to_Y(T_cw, b_in_c_h)
-    # c_in_d, c_in_d_h = transform_from_X_to_Y(T_cd, b_in_c_h)
-    # d_in_w, _ = transform_from_X_to_Y(T_dw, c_in_d_h)
-
     # Align rigid base corners in board space to corresponding positions in depth space.
-    b_in_d, _ = transform_from_X_to_Y(T_bd, board_points_h)
+    b_in_d, _ = transform_from_X_to_Y(T_bd, rigid_board_points_h)
 
-    # 6. VISUALISE RIGID PLATE CORNERS WITH POINT CLOUD (Point cloud 2: backplate corners on board in depth space)
+    # 6. VISUALISE RIGID PLATE CORNERS WITH POINT CLOUD (Point cloud 1: backplate corners on board in depth space)
     create_point_cloud("data/point_clouds/binary/backplate_corners_depth.ply", b_in_d)
 
-    # 7. CANTILEVER GEOMETRY
+    # 7. ALIGN CANTILEVER GEOMETRY TO DEPTH POINT CLOUD SPACE
 
     # Load in all model information
     model_nodes = pd.read_csv(
@@ -589,12 +628,11 @@ if __name__ == "__main__":
         'data/cantilever/deformed_model_nodes.csv', sep=',', header=None).values
 
     # a. Toy example: model fixed end corners
-
     # Process corner nodes for subsequent transformation between spaces
     model_corner_nodes = reorder_model_node_coordinates(model_corner_nodes, True)
 
     # Compute transformation between board and model spaces
-    rotation, translation = find_transformation(board_points, model_corner_nodes)
+    rotation, translation = find_transformation(rigid_board_points, model_corner_nodes)
     T_mb = np.vstack((np.hstack((rotation, translation.reshape(-1, 1))), [0., 0., 0., 1.]))
 
     # Infer transformation between model and depth spaces
@@ -602,33 +640,30 @@ if __name__ == "__main__":
     m_to_d, _ = transform_from_X_to_Y(
         T_md, homogeneous_vectors(model_corner_nodes, 'column').T)
 
-    # Point cloud 3: model fixed end in depth space.
+    # Point cloud 2: model fixed end in depth space.
     create_point_cloud("data/point_clouds/binary/backplate_corners_from_model.ply",
                        m_to_d)
 
-    # b. Apply to all model nodes in undeformed geometry
+    # b. Transform all model nodes of the undeformed geometry to depth space
     undeformed_model_nodes = reorder_model_node_coordinates(model_nodes, False)
     undeformed_model_in_depth, _ = transform_from_X_to_Y(
         T_md, homogeneous_vectors(undeformed_model_nodes, 'column').T)
 
-    # Point cloud 4: undeformed model in depth space
+    # Point cloud 3: undeformed model in depth space
     create_point_cloud("data/point_clouds/binary/model_points_in_depth.ply",
                        undeformed_model_in_depth)
 
-    # c. Apply to all model nodes in deformed geometry
-    deformed_model_nodes = reorder_model_node_coordinates(deformed_model, False)
-    # create_point_cloud("data/point_clouds/binary/TEST_deformed_model_nodes.ply",
-    #                    deformed_model_nodes)
-
-    # Transformation matrix obtained by aligning the rigid base corners of the deformed geometry
-    # to the undeformed geometry (in depth space) using MeshLab's align tool.
+    # c. Transform all model nodes of the deformed geometry to depth space
+    # Transformation matrix between deformed geometry to undeformed geometry by aligning the rigid base corners
+    # of the deformed geometry to the undeformed geometry (in depth space) using MeshLab's align tool.
     T_deformed_undeformed = np.array([[0., 0.33, -0.94, -0.02],
                                       [-0.97, -0.22, -0.08, -0.18],
                                       [-0.24, 0.92, 0.32, 0.52],
                                       [0., 0., 0., 1.]])
+    deformed_model_nodes = reorder_model_node_coordinates(deformed_model, False)
     deformed_model_in_depth, _ = transform_from_X_to_Y(
         T_deformed_undeformed, homogeneous_vectors(deformed_model_nodes, 'column').T)
 
-    # Point cloud 5: deformed model geometry in depth space
+    # Point cloud 4: deformed model geometry in depth space
     create_point_cloud("data/point_clouds/binary/deformed_model_in_depth.ply",
                        deformed_model_in_depth)
