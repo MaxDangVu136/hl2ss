@@ -279,85 +279,6 @@ def transform_from_X_to_Y(t_mtx, x_h):
     return y, y_h
 
 
-def rotation_angles(matrix, order):
-    """
-    input
-        matrix = 3x3 rotation matrix (numpy array)
-        order(str) = rotation order of x, y, z : e.g, rotation XZY -- 'xzy'
-    output
-        theta1, theta2, theta3 = rotation angles in rotation order
-    """
-    r11, r12, r13 = matrix[0]
-    r21, r22, r23 = matrix[1]
-    r31, r32, r33 = matrix[2]
-
-    if order == 'xzx':
-        theta1 = np.arctan(r31 / r21)
-        theta2 = np.arctan(r21 / (r11 * np.cos(theta1)))
-        theta3 = np.arctan(-r13 / r12)
-
-    elif order == 'xyx':
-        theta1 = np.arctan(-r21 / r31)
-        theta2 = np.arctan(-r31 / (r11 * np.cos(theta1)))
-        theta3 = np.arctan(r12 / r13)
-
-    elif order == 'yxy':
-        theta1 = np.arctan(r12 / r32)
-        theta2 = np.arctan(r32 / (r22 * np.cos(theta1)))
-        theta3 = np.arctan(-r21 / r23)
-
-    elif order == 'yzy':
-        theta1 = np.arctan(-r32 / r12)
-        theta2 = np.arctan(-r12 / (r22 * np.cos(theta1)))
-        theta3 = np.arctan(r23 / r21)
-
-    elif order == 'zyz':
-        theta1 = np.arctan(r23 / r13)
-        theta2 = np.arctan(r13 / (r33 * np.cos(theta1)))
-        theta3 = np.arctan(-r32 / r31)
-
-    elif order == 'zxz':
-        theta1 = np.arctan(-r13 / r23)
-        theta2 = np.arctan(-r23 / (r33 * np.cos(theta1)))
-        theta3 = np.arctan(r31 / r32)
-
-    elif order == 'xzy':
-        theta1 = np.arctan(r32 / r22)
-        theta2 = np.arctan(-r12 * np.cos(theta1) / r22)
-        theta3 = np.arctan(r13 / r11)
-
-    elif order == 'xyz':
-        theta1 = np.arctan(-r23 / r33)
-        theta2 = np.arctan(r13 * np.cos(theta1) / r33)
-        theta3 = np.arctan(-r12 / r11)
-
-    elif order == 'yxz':
-        theta1 = np.arctan(r13 / r33)
-        theta2 = np.arctan(-r23 * np.cos(theta1) / r33)
-        theta3 = np.arctan(r21 / r22)
-
-    elif order == 'yzx':
-        theta1 = np.arctan(-r31 / r11)
-        theta2 = np.arctan(r21 * np.cos(theta1) / r11)
-        theta3 = np.arctan(-r23 / r22)
-
-    elif order == 'zyx':
-        theta1 = np.arctan(r21 / r11)
-        theta2 = np.arctan(-r31 * np.cos(theta1) / r11)
-        theta3 = np.arctan(r32 / r33)
-
-    elif order == 'zxy':
-        theta1 = np.arctan(-r12 / r22)
-        theta2 = np.arctan(r32 * np.cos(theta1) / r22)
-        theta3 = np.arctan(-r31 / r33)
-
-    theta1 = theta1 * 180 / np.pi
-    theta2 = theta2 * 180 / np.pi
-    theta3 = theta3 * 180 / np.pi
-
-    return theta1, theta2, theta3
-
-
 def matrix_minus_vector(matrix, vector):
     new_matrix = np.zeros(np.shape(matrix))
     for i in range(len(matrix)):
@@ -460,6 +381,42 @@ def align_model(R, t, model_points):
     return transformed_points.transpose()
 
 
+def reorder_model_node_coordinates(model_node_coordinates, corner):
+    """
+
+    :param model_node_coordinates:
+    :param corner:
+    :return:
+    """
+
+    if corner == True:
+        # Order node coordinates to go clockwise from top left coner of cross-section,
+        # and convert measurements from mm to m.
+        reordered_model_nodes = np.array([model_node_coordinates[1], model_node_coordinates[0],
+                                          model_node_coordinates[2], model_node_coordinates[3]]) / 1000
+    else:
+        reordered_model_nodes = model_node_coordinates / 1000
+
+    # Swap columns around (x: width of cross-section, y: height of cross-section, z: length along beam)
+    reordered_model_nodes = np.array([reordered_model_nodes[:, 1], reordered_model_nodes[:, 2],
+                                      reordered_model_nodes[:, 0]]).T
+
+    return reordered_model_nodes
+
+
+def create_point_cloud(filepath, points):
+    """
+
+    :param filepath:
+    :param points:
+    :return:
+    """
+
+    pc = o3d.geometry.PointCloud()
+    pc.points = o3d.utility.Vector3dVector(points)
+    o3d.io.write_point_cloud(filepath, pc)
+
+
 # ChArUco board specs (m squares x n squares)
 Board16x12 = {
     'squares_x': 16,  # number of squares (n) in the x direction (rows)
@@ -541,6 +498,7 @@ if __name__ == "__main__":
     # Get corresponding image points of rigid base corners from measured positions in board coordinates.
     T_bc = CharucoBoard_to_HoloLensRGB(rvec=rvecs, tvec=tvecs, pv_intrinsic=rgb_intrinsic)
     board_points_h = rigid_base_corners_on_board(board_spec=board_specs, cube_size=0.030, z=0.0)
+    board_points = board_points_h[:-1, :].T
 
     # Board to colour coordinates
     img_points, img_points_h = transform_from_X_to_Y(T_bc, board_points_h)
@@ -580,8 +538,8 @@ if __name__ == "__main__":
     # 5. TRANSFORM BOARD (B), RGB CAM (C), AND DEPTH CAM DATA ONTO REAL WORLD SPACE
 
     # Convert point cloud from HoloLens coordinate system to depth coordinates
-    pcd = o3d.io.read_point_cloud('data/point_clouds/binary/depth_point-cloud_{}.ply'
-                                  .format(imtime))
+    pcd = o3d.io.read_point_cloud(
+        'data/point_clouds/binary/depth_point-cloud_{}.ply'.format(imtime))
     world_pcd = np.asarray(pcd.points)
     world_pcd_h = homogeneous_vectors(world_pcd, 'column').T
     world_to_depth, world_to_depth_h = transform_from_X_to_Y(T_hd, world_pcd_h)
@@ -593,7 +551,8 @@ if __name__ == "__main__":
     T_dc = np.linalg.inv(T_cd)
     T_bd = T_cd @ T_bc
 
-    world = pd.read_csv('data/points/world_{}.csv'.format(imtime), sep=',', header=None).values
+    world = pd.read_csv('data/points/world_{}.csv'.format(imtime),
+                        sep=',', header=None).values
     b_in_w, _ = transform_from_X_to_Y(T_bw, board_points_h)
     b_in_c, b_in_c_h = transform_from_X_to_Y(T_bc, board_points_h)
     c_in_w, c_in_w_h = transform_from_X_to_Y(T_cw, b_in_c_h)
@@ -602,31 +561,28 @@ if __name__ == "__main__":
     b_in_d, _ = transform_from_X_to_Y(T_bd, board_points_h)
 
     # 6. VISUALISE RIGID PLATE CORNERS WITH POINT CLOUD
-    pc = o3d.geometry.PointCloud()
-    pc.points = o3d.utility.Vector3dVector(b_in_d)
-    o3d.io.write_point_cloud("data/point_clouds/binary/backplate_corners_depth.ply", pc)
+    create_point_cloud("data/point_clouds/binary/backplate_corners_depth.ply", b_in_d)
 
     # 7. UNDEFORMED CANTILEVER GEOMETRY
 
     # Load in all model information
-    model_nodes = pd.read_csv('data/undeformed_cantilever/model_nodes.csv',
-                              sep=',', header=None).values
-    model_corner_nodes = pd.read_csv('data/undeformed_cantilever/model_fixed_end_corners.csv',
-                                     sep=',', header=None).values
-    transformed_model_nodes = pd.read_csv('data/undeformed_cantilever/transformed_model_nodes.csv',
-                                          sep=',', header=None).values
-    transformed_model_corner_nodes = pd.read_csv('data/undeformed_cantilever/transformed_model_fixed_end_corners.csv',
-                                                 sep=',', header=None).values
-    centred_model_nodes = pd.read_csv('data/undeformed_cantilever/centred_transformed_model_nodes.csv',
-                                      sep=',', header=None).values
+    model_nodes = pd.read_csv(
+        'data/cantilever/model_nodes.csv', sep=',', header=None).values
+    model_corner_nodes = pd.read_csv(
+        'data/cantilever/model_fixed_end_corners.csv', sep=',', header=None).values
+    transformed_model_nodes = pd.read_csv(
+        'data/cantilever/transformed_model_nodes.csv', sep=',', header=None).values
+    transformed_model_corner_nodes = pd.read_csv(
+        'data/cantilever/transformed_model_fixed_end_corners.csv', sep=',', header=None).values
+    centred_model_nodes = pd.read_csv(
+        'data/cantilever/centred_transformed_model_nodes.csv', sep=',', header=None).values
+    deformed_model = pd.read_csv(
+        'data/cantilever/deformed_model_nodes.csv', sep=',', header=None).values
 
     # a. Toy example: model fixed end corners
-    # Process model fixed end corners for subsequent transformation
-    model_corner_nodes = np.array([model_corner_nodes[1], model_corner_nodes[0],
-                                  model_corner_nodes[2], model_corner_nodes[3]])/1000
-    model_corner_nodes = np.array([model_corner_nodes[:, 1], model_corner_nodes[:, 2],
-                                   model_corner_nodes[:, 0]]).T
-    board_points = board_points_h[:-1, :].T
+
+    # Process corner nodes for subsequent transformation between spaces
+    model_corner_nodes = reorder_model_node_coordinates(model_corner_nodes, True)
 
     # Compute transformation between board and model spaces
     rotation, translation = find_transformation(board_points, model_corner_nodes)
@@ -634,14 +590,23 @@ if __name__ == "__main__":
 
     # Infer transformation between model and depth spaces
     T_md = T_bd @ T_mb
-    m_to_d, _ = transform_from_X_to_Y(T_md, homogeneous_vectors(model_corner_nodes, 'column').T)
+    m_to_d, _ = transform_from_X_to_Y(
+        T_md, homogeneous_vectors(model_corner_nodes, 'column').T)
 
     # Save model fixed end in depth space as point cloud.
-    md = o3d.geometry.PointCloud()
-    md.points = o3d.utility.Vector3dVector(m_to_d)
-    o3d.io.write_point_cloud("data/point_clouds/binary/backplate_corners_from_model.ply", md)
+    create_point_cloud("data/point_clouds/binary/backplate_corners_from_model.ply",
+                       m_to_d)
 
     # b. Apply to all model nodes in undeformed geometry
-
+    undeformed_model_nodes = reorder_model_node_coordinates(model_nodes, False)
+    undeformed_model_in_depth, _ = transform_from_X_to_Y(
+        T_md, homogeneous_vectors(undeformed_model_nodes, 'column').T)
+    create_point_cloud("data/point_clouds/binary/model_points_in_depth.ply",
+                       undeformed_model_in_depth)
 
     # c. Apply to all model nodes in deformed geometry
+    deformed_model_nodes = reorder_model_node_coordinates(deformed_model, False)
+    deformed_model_in_depth, _ = transform_from_X_to_Y(
+        T_md, homogeneous_vectors(deformed_model_nodes, 'column').T)
+    create_point_cloud("data/point_clouds/binary/deformed_model_in_depth.ply",
+                       deformed_model_in_depth)
