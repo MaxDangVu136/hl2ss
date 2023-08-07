@@ -1,3 +1,5 @@
+import math
+import sys
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -161,6 +163,30 @@ def detect_display_markers(charuco_board, img, aruco_dict, aruco_param, cam_mtx,
     return gray, debug_img, img_corners, ids, chessboard_corners, chessboard_id
 
 
+def rodrigues_vec_to_rotation_mat(rodrigues_vec):
+    # Alternative python implementation: https://www.appsloveworld.com/python/782/how-to-convert-a-rodrigues-vector-
+    # to-a-rotation-matrix-without-opencv-using-pytho
+    theta = np.linalg.norm(rodrigues_vec)
+
+    if theta < sys.float_info.epsilon:
+        rotation_mat = np.eye(3, dtype=float)
+    else:
+        r = np.array(rodrigues_vec / theta).flatten()
+        I = np.eye(3, dtype=float)
+        r_rT = np.array([
+            [r[0] * r[0], r[0] * r[1], r[0] * r[2]],
+            [r[1] * r[0], r[1] * r[1], r[1] * r[2]],
+            [r[2] * r[0], r[2] * r[1], r[2] * r[2]]
+        ])
+        r_cross = np.array([
+            [0., -r[2], r[1]],
+            [r[2], 0., -r[0]],
+            [-r[1], r[0], 0.]
+        ])
+        rotation_mat = math.cos(theta) * I + (1 - math.cos(theta)) * r_rT + math.sin(theta) * r_cross
+    return rotation_mat
+
+
 def CharucoBoard_to_HoloLensRGB(rvec, tvec, pv_intrinsic):
     """
     This function computes the transformation matrix from ChArUco board coordinates to the HoloLens RGB camera space.
@@ -182,6 +208,7 @@ def CharucoBoard_to_HoloLensRGB(rvec, tvec, pv_intrinsic):
     """
 
     # Compute 3x3 rotation matrix from the Euler angles vector
+    # Documentation for Rodrigues: https://docs.opencv.org/4.2.0/d9/d0c/group__calib3d.html#ga61585db663d9da06b68e70cfbf6a1eac
     rotation_mat, _ = cv2.Rodrigues(rvec)
 
     # Concatenate the translation vector with rotation matrix to compute the pose matrix
@@ -295,7 +322,7 @@ def matrix_minus_vector(matrix, vector):
         3 x n array of n centred points on an object
     """
 
-    new_matrix = [matrix[idx] - vector[idx] for idx in range(len(matrix))]
+    new_matrix = np.array([matrix[idx] - vector[idx] for idx in range(len(matrix))])
     return new_matrix
 
 
@@ -315,7 +342,7 @@ def find_centroid(matrix):
 
     """
 
-    centroid = [np.mean(matrix[idx]) for idx in range(len(matrix))]
+    centroid = np.array([np.mean(matrix[idx]) for idx in range(len(matrix))])
     return centroid
 
 
@@ -556,8 +583,18 @@ if __name__ == "__main__":
         charucoCorners=charuco_corners, charucoIds=charuco_ids, board=board,
         cameraMatrix=rgb_intrinsic, distCoeffs=rgb_distort, rvec=None, tvec=None)
 
+    # Step 1: Normalize the Rodrigues vector
+    norm_rodrigues = rvecs / np.linalg.norm(rvecs)
+
+    # Step 2: Extract the vector part of the normalized Rodrigues representation
+    axis = norm_rodrigues
+
+    print("Rotation angle (degrees) for rvecs:", np.rad2deg(rvecs))
+    print("Rotation angle (degrees) for axis:", np.rad2deg(axis))
+
     # Get corresponding image points of rigid base corners from measured positions in board coordinates.
     T_bc = CharucoBoard_to_HoloLensRGB(rvec=rvecs, tvec=tvecs, pv_intrinsic=rgb_intrinsic)
+    test = np.array([1.0, 1.0, 1.0])
     rigid_board_points_h = rigid_base_corners_on_board(board_spec=board_specs, cube_size=0.030, z=0.0)
     rigid_board_points = rigid_board_points_h[:-1, :].T
 
