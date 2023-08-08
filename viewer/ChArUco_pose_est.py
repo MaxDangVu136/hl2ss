@@ -179,6 +179,9 @@ def rodrigues_vec_to_rotation_mat(rodrigues_vec):
             [r[2], 0., -r[0]],
             [-r[1], r[0], 0.]
         ])
+
+        # Formulation can be found in Liang (2018): "Efficient conversion from rotating matrix to
+        # rotation axis and angle by extending Rodrigues' formula"
         rotation_mat = np.cos(theta) * I + (1 - np.cos(theta)) * r_rT + np.sin(theta) * r_cross
 
         r_cross_R = np.cos(theta) * r_cross + np.sin(theta) * r_cross @ r_cross
@@ -641,7 +644,9 @@ if __name__ == "__main__":
     # Align rigid base corners in board space to corresponding positions in depth space.
     b_in_d, _ = transform_from_X_to_Y(T_bd, rigid_board_points_h)
 
-    # 6. VISUALISE RIGID PLATE CORNERS WITH POINT CLOUD (Point cloud 1: backplate corners on board in depth space)
+    # 6. VISUALISE RIGID PLATE CORNERS WITH POINT CLOUD
+
+    # Point cloud 1: backplate corners on board in depth space
     create_point_cloud("data/point_clouds/binary/backplate_corners_depth.ply", b_in_d)
 
     # 7. ALIGN CANTILEVER GEOMETRY TO DEPTH POINT CLOUD SPACE
@@ -670,12 +675,12 @@ if __name__ == "__main__":
 
     # Infer transformation between model and depth spaces
     T_md = T_bd @ T_mb
-    m_to_d, _ = transform_from_X_to_Y(
+    corners_in_depth, corners_in_depth_h = transform_from_X_to_Y(
         T_md, homogeneous_vectors(model_corner_nodes, 'column').T)
 
     # Point cloud 2: model fixed end in depth space.
     create_point_cloud("data/point_clouds/binary/backplate_corners_from_model.ply",
-                       m_to_d)
+                       corners_in_depth)
 
     # b. Transform all model nodes of the undeformed geometry to depth space
     undeformed_model_nodes = reorder_model_node_coordinates(model_nodes, False)
@@ -694,9 +699,27 @@ if __name__ == "__main__":
                                       [-0.24, 0.92, 0.32, 0.52],
                                       [0., 0., 0., 1.]])
     deformed_model_nodes = reorder_model_node_coordinates(deformed_model, False)
-    deformed_model_in_depth, _ = transform_from_X_to_Y(
+    deformed_model_in_depth, deformed_model_in_depth_h = transform_from_X_to_Y(
         T_deformed_undeformed, homogeneous_vectors(deformed_model_nodes, 'column').T)
 
     # Point cloud 4: deformed model geometry in depth space
     create_point_cloud("data/point_clouds/binary/deformed_model_in_depth.ply",
                        deformed_model_in_depth)
+
+
+    # 8. CONVERT DEPTH INFORMATION TO UNDEFORMED MODEL SPACE
+    T_dm = np.linalg.inv(T_md)
+
+    # Depth point cloud to undeformed space
+    pc = o3d.io.read_point_cloud('data/point_clouds/binary/depth_point-cloud_{}.ply'.format(imtime))
+    depth_pc = np.asarray(pc.points)
+    depth_pc_h = homogeneous_vectors(depth_pc, 'column').T
+
+    d_in_m, _ = transform_from_X_to_Y(T_dm, depth_pc_h)
+    corners_in_m, _ = transform_from_X_to_Y(T_dm, corners_in_depth_h)
+    deformed_in_m, _ = transform_from_X_to_Y(T_dm, deformed_model_in_depth_h)
+
+    create_point_cloud("data/point_clouds/binary/cantilever_model.ply", undeformed_model_nodes*1000)
+    create_point_cloud("data/point_clouds/binary/TEST_depth_points_in_model.ply", d_in_m*1000)
+    create_point_cloud("data/point_clouds/binary/TEST_rigid_corner_in_model.ply", corners_in_m*1000)
+    create_point_cloud("data/point_clouds/binary/TEST_deformed_geometry_in_model.ply", deformed_in_m*1000)
