@@ -1,4 +1,3 @@
-import math
 import sys
 import numpy as np
 import pandas as pd
@@ -173,18 +172,22 @@ def rodrigues_vec_to_rotation_mat(rodrigues_vec):
     else:
         r = np.array(rodrigues_vec / theta).flatten()
         I = np.eye(3, dtype=float)
-        r_rT = np.array([
-            [r[0] * r[0], r[0] * r[1], r[0] * r[2]],
-            [r[1] * r[0], r[1] * r[1], r[1] * r[2]],
-            [r[2] * r[0], r[2] * r[1], r[2] * r[2]]
-        ])
+        r_rT = r.reshape(-1, 1) @ r.reshape(-1, 3)
+
         r_cross = np.array([
             [0., -r[2], r[1]],
             [r[2], 0., -r[0]],
             [-r[1], r[0], 0.]
         ])
-        rotation_mat = math.cos(theta) * I + (1 - math.cos(theta)) * r_rT + math.sin(theta) * r_cross
-    return rotation_mat
+        rotation_mat = np.cos(theta) * I + (1 - np.cos(theta)) * r_rT + np.sin(theta) * r_cross
+
+        r_cross_R = np.cos(theta) * r_cross + np.sin(theta) * r_cross @ r_cross
+        zeta = np.arcsin(-np.trace(r_cross_R) / 2)
+
+        angle_1 = theta
+        angle_2 = zeta
+
+    return rotation_mat, angle_1, angle_2
 
 
 def CharucoBoard_to_HoloLensRGB(rvec, tvec, pv_intrinsic):
@@ -583,18 +586,11 @@ if __name__ == "__main__":
         charucoCorners=charuco_corners, charucoIds=charuco_ids, board=board,
         cameraMatrix=rgb_intrinsic, distCoeffs=rgb_distort, rvec=None, tvec=None)
 
-    # Step 1: Normalize the Rodrigues vector
-    norm_rodrigues = rvecs / np.linalg.norm(rvecs)
-
-    # Step 2: Extract the vector part of the normalized Rodrigues representation
-    axis = norm_rodrigues
-
-    print("Rotation angle (degrees) for rvecs:", np.rad2deg(rvecs))
-    print("Rotation angle (degrees) for axis:", np.rad2deg(axis))
+    R, theta, zeta = rodrigues_vec_to_rotation_mat(rodrigues_vec=rvecs)
+    gravity = 9.81 * np.array([np.sin(theta), np.cos(theta) * np.cos(0), np.cos(theta) * np.sin(0)]) # note that we swapped x and y around
 
     # Get corresponding image points of rigid base corners from measured positions in board coordinates.
     T_bc = CharucoBoard_to_HoloLensRGB(rvec=rvecs, tvec=tvecs, pv_intrinsic=rgb_intrinsic)
-    test = np.array([1.0, 1.0, 1.0])
     rigid_board_points_h = rigid_base_corners_on_board(board_spec=board_specs, cube_size=0.030, z=0.0)
     rigid_board_points = rigid_board_points_h[:-1, :].T
 
