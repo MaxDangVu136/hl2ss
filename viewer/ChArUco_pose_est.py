@@ -4,6 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import cv2  # OpenCV version was 4.4
 import open3d as o3d
+import csv
 
 
 # FUNCTIONS
@@ -506,6 +507,18 @@ def create_point_cloud(filepath, points):
     o3d.io.write_point_cloud(filepath, pc)
 
 
+def write_to_csv(filepath, data):
+    """
+
+    :param filepath:
+    :param data:
+    :return:
+    """
+    with open(filepath, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerows(np.asarray(data))
+
+
 # ChArUco board specs (m squares x n squares)
 Board16x12 = {
     'squares_x': 16,  # number of squares (n) in the x direction (rows)
@@ -590,7 +603,9 @@ if __name__ == "__main__":
         cameraMatrix=rgb_intrinsic, distCoeffs=rgb_distort, rvec=None, tvec=None)
 
     R, theta, zeta = rodrigues_vec_to_rotation_mat(rodrigues_vec=rvecs)
-    gravity = 9.81 * np.array([np.sin(theta), np.cos(theta) * np.cos(0), np.cos(theta) * np.sin(0)]) # note that we swapped x and y around
+
+    # note that we swapped x and y around
+    gravity = 9.81 * np.array([np.sin(theta), np.cos(theta) * np.cos(0), np.cos(theta) * np.sin(0)]).astype(float)
 
     # Get corresponding image points of rigid base corners from measured positions in board coordinates.
     T_bc = CharucoBoard_to_HoloLensRGB(rvec=rvecs, tvec=tvecs, pv_intrinsic=rgb_intrinsic)
@@ -706,20 +721,27 @@ if __name__ == "__main__":
     create_point_cloud("data/point_clouds/binary/deformed_model_in_depth.ply",
                        deformed_model_in_depth)
 
-
     # 8. CONVERT DEPTH INFORMATION TO UNDEFORMED MODEL SPACE
     T_dm = np.linalg.inv(T_md)
 
-    # Depth point cloud to undeformed space
+    # Load depth point cloud data
     pc = o3d.io.read_point_cloud('data/point_clouds/binary/depth_point-cloud_{}.ply'.format(imtime))
     depth_pc = np.asarray(pc.points)
     depth_pc_h = homogeneous_vectors(depth_pc, 'column').T
 
+    # Depth point cloud to undeformed space
     d_in_m, _ = transform_from_X_to_Y(T_dm, depth_pc_h)
     corners_in_m, _ = transform_from_X_to_Y(T_dm, corners_in_depth_h)
     deformed_in_m, _ = transform_from_X_to_Y(T_dm, deformed_model_in_depth_h)
 
-    create_point_cloud("data/point_clouds/binary/cantilever_model.ply", undeformed_model_nodes*1000)
-    create_point_cloud("data/point_clouds/binary/TEST_depth_points_in_model.ply", d_in_m*1000)
-    create_point_cloud("data/point_clouds/binary/TEST_rigid_corner_in_model.ply", corners_in_m*1000)
-    create_point_cloud("data/point_clouds/binary/TEST_deformed_geometry_in_model.ply", deformed_in_m*1000)
+    # Write data to use in mechanics
+    write_to_csv('data/point_clouds/cantilever_model.csv', 1000*undeformed_model_nodes)
+    write_to_csv('data/point_clouds/depth_data.csv', 1000*d_in_m)
+    write_to_csv('data/point_clouds/rigid_base_corners.csv', 1000 * corners_in_m)
+    write_to_csv('data/point_clouds/deformed_model.csv', 1000 * deformed_in_m)
+    write_to_csv('data/point_clouds/horizontal_gravity.csv', gravity)
+
+    # create_point_cloud("data/point_clouds/binary/cantilever_model.ply", undeformed_model_nodes*1000)
+    # create_point_cloud("data/point_clouds/binary/TEST_depth_points_in_model.ply", d_in_m*1000)
+    # create_point_cloud("data/point_clouds/binary/TEST_rigid_corner_in_model.ply", corners_in_m*1000)
+    # create_point_cloud("data/point_clouds/binary/TEST_deformed_geometry_in_model.ply", deformed_in_m*1000)
