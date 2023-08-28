@@ -80,29 +80,69 @@ def write_to_csv(filepath, data):
 #   initialise pipeline
 pipeline = rs.pipeline()
 conf = rs.config()
-#conf.enable_stream(rs.stream.depth, 848, 480, rs.format.z16, 30)
-conf.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
-conf.enable_stream(rs.stream.infrared, 1, 1280, 720, rs.format.y8, 30)
+
+depth = True
+rgb_ir_imu = False
+
+if depth:
+    conf.enable_stream(rs.stream.depth, 848, 480, rs.format.z16, 30)
+    conf.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
+
+else:
+    conf.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
+    conf.enable_stream(rs.stream.infrared, 1, 1280, 720, rs.format.y8, 30)
+
 conf.enable_stream(rs.stream.accel)
-conf.enable_stream(rs.stream.gyro)
 
 #   start streaming
 pipeline.start(conf)
-
 
 try:
     while True:
         #   wait for a frame (make sure camera not opened on RealSense viewer)
         f = pipeline.wait_for_frames()
 
-        #   collect image frames and IMU data frames
-        # depth_frame = f.get_depth_frame()
-        RGB_frame = f.get_color_frame()
-        ir1_frame = f.get_infrared_frame(1)     # 1 is for left IR cam, 2 is for right IR cam.
-        accel_frame = f.first_or_default(rs.stream.accel)
-        gyro_frame = f.first_or_default(rs.stream.gyro)
+        if depth:
+            #  collect data frames
+            depth_frame = f.get_depth_frame()
+            accel_frame = f.first_or_default(rs.stream.accel)
 
-        if RGB_frame and ir1_frame:
+            #   extract sensor intrinsics (https://github.com/IntelRealSense/librealsense/issues/10180)
+            depth_frame_intrinsic = depth_frame.profile.as_video_stream_profile().get_intrinsics()
+            depth_intrinsic, depth_distortion = construct_intrinsic(depth_frame_intrinsic)
+
+            #   extract transformation matrices from depth and RGB to accelerometer space
+            depth_to_accel_extrinsic = depth_frame.profile.get_extrinsics_to(accel_frame.profile)
+            T_depth_to_accel = construct_extrinsic(depth_to_accel_extrinsic)
+
+            #   declare pointcloud object, for calculating pointclouds and texture mappings
+            pc = rs.pointcloud()
+
+            #   generate texture for our PLY
+            colorizer = rs.colorizer()
+            colorized = colorizer.process(f)
+            colorized_depth = colorizer.colorize(depth_frame)
+            depth_colormap = np.asanyarray(colorized_depth.get_data())
+
+            #   extract point coordinates from depth cloud
+            points = pc.calculate(depth_frame)
+            v, t = points.get_vertices(), points.get_texture_coordinates()
+            verts = np.asanyarray(v).view(np.float32).reshape(-1, 3)  # xyz
+            texcoords = np.asanyarray(t).view(np.float32).reshape(-1, 2)  # uv
+
+            #   measuring distance of points from depth data
+            #   https://github.com/IntelRealSense/librealsense/blob/master/examples/C/distance/rs-distance.c
+            #   https://dev.intelrealsense.com/docs/rs-measure
+            #   Note: All stereo-based 3D cameras have the property of noise being proportional to distance squared.
+            # To counteract this we transform the frame into disparity-domain making the noise more uniform across distance
+
+            #   show data
+            cv2.imshow("Depth", depth_colormap)
+
+        elif rgb_ir_imu:
+            RGB_frame = f.get_color_frame()
+            ir1_frame = f.get_infrared_frame(1)     # 1 is for left IR cam, 2 is for right IR cam.
+            accel_frame = f.first_or_default(rs.stream.accel)
 
             #   extract sensor intrinsics (https://github.com/IntelRealSense/librealsense/issues/10180)
             RGB_frame_intrinsic = RGB_frame.profile.as_video_stream_profile().get_intrinsics()
@@ -119,30 +159,14 @@ try:
             #   collect image data if image frames are detected
             RGB_img = np.asanyarray(RGB_frame.get_data())
             ir1_img = np.asanyarray(ir1_frame.get_data())
+            accel = accel_data(accel_frame.as_motion_frame().get_motion_data())
 
-        # if depth_frame:
-        #
-        #     #   colourise depth cloud
-        #     #   https://github.com/IntelRealSense/librealsense/blob/master/wrappers/python/examples/pyglet_pointcloud_viewer.py#L409
-        #     #   https://github.com/IntelRealSense/librealsense/issues/6194#issuecomment-608371293
-        #     colorizer = rs.colorizer()
-        #     colorized_depth = colorizer.colorize(depth_frame)
-        #     depth_colormap = np.asanyarray(colorized_depth.get_data())
-        #
-        #     #   export depth point cloud as PLY file (https://github.com/IntelRealSense/librealsense/blob/master/wrappers/python/examples/export_ply_example.py)
-
+            #   show data
+            cv2.imshow("Left IR", ir1_img)
+            cv2.imshow("RGB image", RGB_img)
 
         else:
             continue
-
-        #   collect imu data
-        accel = accel_data(accel_frame.as_motion_frame().get_motion_data())
-        print(accel)
-        gyro = gyro_data(gyro_frame.as_motion_frame().get_motion_data())
-
-        #   show data
-        cv2.imshow("Left IR", ir1_img)
-        cv2.imshow("RGB image", RGB_img)
 
         #   stop acquisition
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -152,12 +176,30 @@ finally:
     pipeline.stop()
     cv2.destroyAllWindows()
 
-#   save data
-cv2.imwrite('data/realsense/ir1_img.png', ir1_img)
-cv2.imwrite('data/realsense/RGB_img.png', RGB_img)
-ChArUco_pose_est.write_to_csv('data/realsense/ir1_img.csv', ir1_img)
-ChArUco_pose_est.write_to_csv('data/realsense/RGB_img.csv', RGB_img)
-#   ChArUco_pose_est.write_to_csv('data/realsense/depth_norm.csv', depth_colormap)
+#%%
+if depth:
+    #   save acceleration to depth transformations
+    ChArUco_pose_est.write_to_csv("data/realsense/T_depth_accel.csv", T_depth_to_accel)
+
+    #   export depth point cloud as PLY file (https://github.com/IntelRealSense/librealsense/blob/master/wrappers/python/examples/export_ply_example.py)
+    ply = rs.save_to_ply("data/realsense/point_cloud.ply")
+
+    # Set options to the desired values
+    # In this example we'll generate a textual PLY with normals (mesh is already created by default)
+    ply.set_option(rs.save_to_ply.option_ply_binary, False)
+    ply.set_option(rs.save_to_ply.option_ply_normals, True)
+
+    # Apply the processing block to the frameset which contains the depth frame and the texture
+    ply.process(colorized)
+
+    ChArUco_pose_est.create_point_cloud("data/realsense/depth_vertices.ply", verts)
+
+if rgb_ir_imu:
+    #   save image data
+    cv2.imwrite('data/realsense/ir1_img.png', ir1_img)
+    cv2.imwrite('data/realsense/RGB_img.png', RGB_img)
+    ChArUco_pose_est.write_to_csv('data/realsense/ir1_img.csv', ir1_img)
+    ChArUco_pose_est.write_to_csv('data/realsense/RGB_img.csv', RGB_img)
 
 #   ChArUco board specs (m squares x n squares)
 Board16x12 = {
@@ -188,6 +230,7 @@ plt.title('ChArUco board')
 plt.show()
 # ----------
 
+#%%
 #   2. DETECT CHARUCO BOARD CORNERS
 gray_img, overlay_img, aruco_corners, aruco_ids, charuco_corners, charuco_ids = \
     ChArUco_pose_est.detect_display_markers(charuco_board=board, img=RGB_img, aruco_dict=aruco_dictionary,
@@ -210,10 +253,13 @@ outcome, rvecs, tvecs = cv2.aruco.estimatePoseCharucoBoard(
     charucoCorners=charuco_corners, charucoIds=charuco_ids, board=board,
     cameraMatrix=RGB_intrinsic, distCoeffs=RGB_distortion, rvec=None, tvec=None)
 
+#%%
 #   Get corresponding image points of rigid base corners from measured positions in board coordinates.
 T_board_to_RGB = ChArUco_pose_est.charucoboard_to_camspace(rvec=rvecs, tvec=tvecs, intrinsic=RGB_intrinsic)
+ChArUco_pose_est.write_to_csv("data/realsense/transformations/T_board_RGB.csv", T_board_to_RGB)
 rigid_board_points_h = ChArUco_pose_est.rigid_base_corners_on_board(board_spec=board_specs, cube_size=0.030, z=0.0)
 rigid_board_points = rigid_board_points_h[:-1, :].T
+ChArUco_pose_est.write_to_csv("data/realsense/rigid_corners_board.csv", rigid_board_points_h.T)
 
 #   Board to colour coordinates
 img_points, img_points_h = ChArUco_pose_est.transform_from_X_to_Y(T_board_to_RGB, rigid_board_points_h)
@@ -230,20 +276,46 @@ cv2.waitKey(0)
 
 # #   Transform gravity vector from accel space to board space via infrared camera space
 T_board_to_RGB = np.vstack((T_board_to_RGB, [0., 0., 0., 1.]))
+ChArUco_pose_est.write_to_csv("data/realsense/T_board_RGB.csv", T_board_to_RGB)
+
 T_accel_to_ir1 = np.vstack((T_accel_to_ir1, [0., 0., 0., 1.]))
 T_ir1_to_RGB = np.vstack((RGB_intrinsic @ T_ir1_to_RGB, [0., 0., 0., 1.]))
+T_accel_to_RGB = T_ir1_to_RGB @ T_accel_to_ir1
+
 T_ir1_to_board = np.linalg.inv(T_board_to_RGB) @ T_ir1_to_RGB
 T_accel_to_board = T_ir1_to_board @ T_accel_to_ir1
 
 accel_h = np.vstack(([accel, 0.]))
-print("Gravity from accel:", accel.T)
+ChArUco_pose_est.write_to_csv("data/realsense/transformations/T_accel_board.csv", T_accel_to_board)
+ChArUco_pose_est.write_to_csv("data/realsense/transformations/gravity.csv", accel.T)
 
+#   x,y,z is right hand coordinate system, so flip y and z axis directions to match board orientation.
 gravity_accel_board = T_accel_to_board @ accel_h
-print("Accel in board: ", gravity_accel_board[:-1].T)
+gravity_unit = gravity_accel_board/np.linalg.norm(gravity_accel_board)
+gravity_info = np.array([gravity_accel_board[0], -gravity_accel_board[1], -gravity_accel_board[2]])
+print("gravity info:", gravity_info.T)
 
-#   Write gravity vector to file, add negative sign as board space is
-gravity_info = np.array([[gravity_accel_board[0]],
-                         [-gravity_accel_board[1]],
-                         [gravity_accel_board[2]]])
+#   Visualise gravity vector in RGB coordinates, inspect if it makes sense,
+gravity_in_RGB, _ = ChArUco_pose_est.transform_from_X_to_Y(T_board_to_RGB[:-1, :], gravity_unit)
+gravity_in_RGB = np.reshape(gravity_in_RGB, (-1, 1))
+print("gravity in RGB:", gravity_in_RGB)
 
-ChArUco_pose_est.write_to_csv('data/realsense/gravity.csv', gravity_info)
+#   Calculate end point of vector to draw on image.
+scale = 0.001
+thickness = 5
+color = (0, 165, 255) # BGR color (red)
+start_point = (overlay_img.shape[1]//2,
+               overlay_img.shape[0]//2)
+end_point = (int(overlay_img.shape[1]/2 + gravity_in_RGB[0]*scale),
+             int(overlay_img.shape[0]/2 + gravity_in_RGB[1]*scale))
+
+[cv2.circle(overlay_img, tuple(img_points[idx, :].astype(int)), radius=10,
+            color=(255, 255, 0), thickness=-1) for idx in range(img_points.shape[0])]
+cv2.drawFrameAxes(overlay_img, cameraMatrix=RGB_intrinsic, distCoeffs=RGB_distortion,
+                  rvec=rvecs, tvec=tvecs, length=0.03, thickness=5)
+cv2.arrowedLine(overlay_img, start_point,
+                end_point, color, thickness)
+cv2.namedWindow("Board with gravity", cv2.WINDOW_NORMAL)
+cv2.resizeWindow("Board with gravity", 960, 540)
+cv2.imshow("Board with gravity", overlay_img)
+cv2.waitKey(0)

@@ -145,9 +145,12 @@ def detect_display_markers(charuco_board, img, aruco_dict, aruco_param, cam_mtx,
     """
 
     # Convert img from rgb to grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    if len(img.shape) == 3:
+        gray = cv2.cvtColor(src=img, code=cv2.COLOR_BGR2GRAY)
+    elif len(img.shape) == 2:
+        gray = img
     plt.imshow(gray, cmap='gray')
-    plt.title('RGB image with Charuco board')
+    plt.title('Charuco board')
     plt.show()
 
     # Detect the markers in the image
@@ -194,9 +197,9 @@ def rodrigues_vec_to_rotation_mat(rodrigues_vec):
     return rotation_mat, angle_1, angle_2
 
 
-def CharucoBoard_to_HoloLensRGB(rvec, tvec, pv_intrinsic):
+def charucoboard_to_camspace(rvec, tvec, intrinsic):
     """
-    This function computes the transformation matrix from ChArUco board coordinates to the HoloLens RGB camera space.
+    This function computes the transformation matrix from ChArUco board coordinates to a specified camera space.
 
     Parameters
     ----------
@@ -223,7 +226,7 @@ def CharucoBoard_to_HoloLensRGB(rvec, tvec, pv_intrinsic):
 
     # Project the RGB camera calibration properties onto the pose matrix to obtain the
     # transformation from board to RGB spaces.
-    t_bc = pv_intrinsic @ pose_bc
+    t_bc = intrinsic @ pose_bc
 
     return t_bc
 
@@ -263,10 +266,10 @@ def rigid_base_corners_on_board(board_spec, cube_size, z):
         Contains the specifications to create a ChArUco board of m squares by n squares.
 
     cube_size: float
-        Dimensions of the square cross-section of the cantilever beam attached to the rigid base.
+        Dimensions of the square cross-section of the cantilever beam attached to the rigid base (in mm).
 
     z: float
-        Distance of rigid base corner from the surface viewed of the ChArUco board.
+        Distance of rigid base corner from the surface viewed of the ChArUco board (in mm).
 
     Return
     ------
@@ -474,10 +477,16 @@ def reorder_model_node_coordinates(model_node_coordinates, corner):
     """
 
     if corner is True:
+        # Order node coordinates to go anticlockwise from top left corner of cross-section,
+        # and convert measurements from mm to m.
+        # reordered_model_nodes = np.array([model_node_coordinates[1], model_node_coordinates[0],
+        #                                   model_node_coordinates[2], model_node_coordinates[3]]) / 1000
+
         # Order node coordinates to go clockwise from top left corner of cross-section,
         # and convert measurements from mm to m.
         reordered_model_nodes = np.array([model_node_coordinates[1], model_node_coordinates[0],
                                           model_node_coordinates[2], model_node_coordinates[3]]) / 1000
+
     else:
         reordered_model_nodes = model_node_coordinates / 1000
 
@@ -525,6 +534,33 @@ def write_to_csv(filepath, data):
         writer.writerows(np.asarray(data))
 
 
+def write_to_txt(filepath, data, delimiter):
+    """
+    This function writes a 2D array of data points to a text file located at a specified filepath.
+
+    Parameters
+    ----------
+    filepath: str
+        path to where the .csv data file is saved.
+
+    data: array
+        k x 3 array of nodal coordinates of data points.
+
+    delimiter: str
+        delimiter to separate data values (e.g. ',' or ' ')
+    """
+
+    with open(filepath, 'w') as file:
+
+        for point in data:
+
+            # Convert each element to string and join them with a separator (e.g., comma)
+            point_str = delimiter.join(map(str, point))
+
+            # Write the formatted row to the file
+            file.write(point_str + '\n')  # Add a newline after each row
+
+
 # ChArUco board specs (m squares x n squares)
 Board16x12 = {
     'squares_x': 16,  # number of squares (n) in the x direction (rows)
@@ -570,14 +606,14 @@ if __name__ == "__main__":
     # 0. LOADING RELEVANT IMAGES AND CAMERA MATRICES
 
     # time at which HoloLens Research Mode images were taken
-    imtime = '2023-08-09_16-53-51'
+    imtime = '2023-08-09_10-32-54'
 
     # RGB images are captured slightly after the research mode images
-    rgb_img = cv2.imread('data/rgb_images/20230809_165408_HoloLens.jpg')
-
+    rgb_img = cv2.imread('data/rgb_images/20230809_103310_HoloLens.jpg')
     rgb_intrinsic, rgb_distort, rgb_extrinsic, depth_intrinsic, depth_extrinsic, T_dw, T_wc = \
         load_hololens_matrices_at_time(time=imtime)
 
+    # Get depth images
     depth_map = get_depth_map(time=imtime)
     # ----------
 
@@ -608,15 +644,15 @@ if __name__ == "__main__":
         charucoCorners=charuco_corners, charucoIds=charuco_ids, board=board,
         cameraMatrix=rgb_intrinsic, distCoeffs=rgb_distort, rvec=None, tvec=None)
 
-    R, theta, zeta = rodrigues_vec_to_rotation_mat(rodrigues_vec=rvecs)
-
-    # note that we swapped x and y around
-    gravity = 9.81 * np.array([[np.sin(theta)],
-                               [np.cos(theta) * np.cos(0)],
-                               [np.cos(theta) * np.sin(0)]])
+    # R, theta, zeta = rodrigues_vec_to_rotation_mat(rodrigues_vec=rvecs)
+    #
+    # # note that we swapped x and y around
+    # gravity = 9.81 * np.array([[np.sin(theta)],
+    #                            [np.cos(theta) * np.cos(0)],
+    #                            [np.cos(theta) * np.sin(0)]])
 
     # Get corresponding image points of rigid base corners from measured positions in board coordinates.
-    T_bc = CharucoBoard_to_HoloLensRGB(rvec=rvecs, tvec=tvecs, pv_intrinsic=rgb_intrinsic)
+    T_bc = charucoboard_to_camspace(rvec=rvecs, tvec=tvecs, intrinsic=rgb_intrinsic)
     rigid_board_points_h = rigid_base_corners_on_board(board_spec=board_specs, cube_size=0.030, z=0.0)
     rigid_board_points = rigid_board_points_h[:-1, :].T
 
@@ -645,7 +681,8 @@ if __name__ == "__main__":
     T_bd = T_cd @ T_bc
 
     # Align rigid base corners in board space to corresponding positions in depth space.
-    b_in_d, _ = transform_from_X_to_Y(T_bd, rigid_board_points_h)
+    b_in_d, b_in_d_h = transform_from_X_to_Y(T_bd, rigid_board_points_h)
+    test_d_in_b, _ = transform_from_X_to_Y(np.linalg.inv(T_bd), b_in_d_h)
 
     # 5. VISUALISE RIGID PLATE CORNERS WITH POINT CLOUD
 
@@ -710,6 +747,7 @@ if __name__ == "__main__":
                                       [1.00, 0.01, 0.00, 0.015],
                                       [0.01, -0.61, -0.79, 0.00],
                                       [0., 0., 0., 1.]])
+    write_to_csv("data/realsense/T_deformed_undeformed.csv", T_deformed_undeformed)
 
     deformed_model_in_undeformed, deformed_model_in_undeformed_h = transform_from_X_to_Y(
         T_deformed_undeformed, homogeneous_vectors(deformed_model_nodes, 'column').T)
@@ -745,15 +783,14 @@ if __name__ == "__main__":
     # Keep only points inside the bounding box
     filtered_pc = np.array([pt for pt in d_in_m if x_min <= pt[0] <= x_max and y_min <= pt[1] <= y_max])
 
-    # Write data to use in mechanics
-    write_to_csv('data/point_clouds/cantilever_model.csv', 1000 * undeformed_model_nodes)
-    write_to_csv('data/point_clouds/depth_data.csv', 1000 * d_in_m)
-    write_to_csv('data/point_clouds/rigid_base_corners.csv', 1000 * corners_in_m)
-    write_to_csv('data/point_clouds/deformed_model.csv', 1000 * deformed_in_m)
-    write_to_csv('data/point_clouds/horizontal_gravity.csv', gravity)
-
-    create_point_cloud("data/point_clouds/binary/cantilever_model.ply", undeformed_model_nodes * 1000)
-    create_point_cloud("data/point_clouds/binary/TEST_depth_points_in_model.ply", d_in_m * 1000)
-    create_point_cloud("data/point_clouds/binary/TEST_filtered_points_in_model.ply", filtered_pc * 1000)
-    create_point_cloud("data/point_clouds/binary/TEST_rigid_corner_in_model.ply", corners_in_m * 1000)
-    create_point_cloud("data/point_clouds/binary/TEST_deformed_geometry_in_model.ply", deformed_in_m * 1000)
+    # # Write data to use in mechanics
+    # write_to_csv('data/point_clouds/cantilever_model.csv', 1000 * undeformed_model_nodes)
+    # write_to_csv('data/point_clouds/depth_data.csv', 1000 * d_in_m)
+    # write_to_csv('data/point_clouds/rigid_base_corners.csv', 1000 * corners_in_m)
+    # write_to_csv('data/point_clouds/deformed_model.csv', 1000 * deformed_in_m)
+    #
+    # create_point_cloud("data/point_clouds/binary/cantilever_model.ply", undeformed_model_nodes * 1000)
+    # create_point_cloud("data/point_clouds/binary/TEST_depth_points_in_model.ply", d_in_m * 1000)
+    # create_point_cloud("data/point_clouds/binary/TEST_filtered_points_in_model.ply", filtered_pc * 1000)
+    # create_point_cloud("data/point_clouds/binary/TEST_rigid_corner_in_model.ply", corners_in_m * 1000)
+    # create_point_cloud("data/point_clouds/binary/TEST_deformed_geometry_in_model.ply", deformed_in_m * 1000)
